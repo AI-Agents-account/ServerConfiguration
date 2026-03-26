@@ -100,6 +100,46 @@ TUNADDR=${TUN2SOCKS_TUN_ADDR}
 EOF
 }
 
+write_poststart_script() {
+  log "Writing /usr/local/bin/tun2socks-poststart.sh"
+  cat > /usr/local/bin/tun2socks-poststart.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Expects EnvironmentFile=/etc/default/tun2socks
+: "${SSIP:?}"
+: "${IFACE:?}"
+: "${TUNDEV:?}"
+
+MIP=$(ip route show default 0.0.0.0/0 2>/dev/null | awk '/default/ {for (i=1;i<=NF;i++) if ($i=="via") {print $(i+1); exit}}')
+if [[ -z "${MIP}" ]]; then
+  echo "[tun2socks-poststart] ERROR: cannot detect default gateway (MIP)" >&2
+  exit 1
+fi
+
+LIP=$(ip -4 addr show dev "${IFACE}" | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)
+if [[ -z "${LIP}" ]]; then
+  echo "[tun2socks-poststart] ERROR: cannot detect local IPv4 on IFACE=${IFACE}" >&2
+  exit 1
+fi
+
+# Ensure primary route via IFACE exists as fallback
+ip route del default dev "${IFACE}" 2>/dev/null || true
+ip route replace default via "${MIP}" dev "${IFACE}" metric 200
+
+# Policy routing table for local IP
+ip rule add from "${LIP}" table lip 2>/dev/null || true
+ip route replace default via "${MIP}" dev "${IFACE}" table lip
+
+# Route to SS server directly via IFACE (so we don't tunnel the tunnel)
+ip route replace "${SSIP}/32" via "${MIP}" dev "${IFACE}"
+
+# Primary default route via tun
+ip route replace default dev "${TUNDEV}" metric 50
+EOF
+  chmod +x /usr/local/bin/tun2socks-poststart.sh
+}
+
 write_service() {
   log "Writing /etc/systemd/system/tun2socks.service"
   cat > /etc/systemd/system/tun2socks.service <<'EOF'
@@ -113,21 +153,12 @@ User=root
 EnvironmentFile=/etc/default/tun2socks
 
 ExecStartPre=-/sbin/ip tuntap add mode tun dev ${TUNDEV}
-ExecStartPre=/sbin/ip addr add ${TUNADDR} dev ${TUNDEV}
+ExecStartPre=/sbin/ip addr replace ${TUNADDR} dev ${TUNDEV}
 ExecStartPre=/sbin/ip link set dev ${TUNDEV} up
 
 ExecStart=/usr/local/bin/tun2socks -device tun://${TUNDEV} -proxy ss://${SSMETHOD}:${SSPASSWORD}@${SSIP}:${SSPORT}
 
-# Keep main route on IFACE as secondary, route SS server directly via IFACE
-ExecStartPost=/bin/bash -c 'MIP=$(ip r l | grep "default via" | awk "{print \$3}" | head -n1); \
-  LIP=$(ip -4 a l ${IFACE} | awk "/inet /{ print \$2 }" | cut -f1 -d"/" | head -n1); \
-  ip r del default dev ${IFACE} 2>/dev/null || true; \
-  ip r add default via $MIP dev ${IFACE} metric 200; \
-  ip rule add from $LIP table lip 2>/dev/null || true; \
-  ip r replace default via $MIP dev ${IFACE} table lip; \
-  ip r replace ${SSIP}/32 via $MIP dev ${IFACE}'
-
-ExecStartPost=/sbin/ip r replace default dev ${TUNDEV} metric 50
+ExecStartPost=/usr/local/bin/tun2socks-poststart.sh
 
 ExecStopPost=-/sbin/ip r flush table lip
 ExecStopPost=-/sbin/ip rule delete table lip
@@ -165,6 +196,7 @@ main() {
   enable_ip_forward
   ensure_rt_table
   write_defaults
+  write_poststart_script
   write_service
   enable_service
   log "Done."
