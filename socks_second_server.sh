@@ -51,33 +51,35 @@ configure_nftables() {
 
   systemctl enable --now nftables || true
 
-  # Create a dedicated table/chain so we don't depend on existing distro rules.
-  nft list table inet sproxy >/dev/null 2>&1 || nft add table inet sproxy
-  nft list chain inet sproxy input >/dev/null 2>&1 || nft add chain inet sproxy input '{ type filter hook input priority 0; policy accept; }'
+  # Use canonical names so the manual command works exactly as documented:
+  # nft add element inet filter ALLOWED_SPROXY { <ip> }
+  nft list table inet filter >/dev/null 2>&1 || nft add table inet filter
 
-  # Create or recreate the set
-  nft list set inet sproxy allowed_ips >/dev/null 2>&1 && nft delete set inet sproxy allowed_ips || true
-  nft add set inet sproxy allowed_ips '{ type ipv4_addr; flags interval; }'
+  # Ensure an input chain exists (on some minimal systems it may be missing)
+  nft list chain inet filter input >/dev/null 2>&1 || nft add chain inet filter input '{ type filter hook input priority 0; policy accept; }'
+
+  # Create or recreate the allowlist set
+  nft list set inet filter ALLOWED_SPROXY >/dev/null 2>&1 && nft delete set inet filter ALLOWED_SPROXY || true
+  nft add set inet filter ALLOWED_SPROXY '{ type ipv4_addr; flags interval; }'
 
   IFS=',' read -r -a IPS <<< "${ALLOWED_IPS}"
   for ip in "${IPS[@]}"; do
     ip="${ip// /}"
     [[ -n "${ip}" ]] || continue
-    nft add element inet sproxy allowed_ips "{ ${ip} }" || true
+    nft add element inet filter ALLOWED_SPROXY "{ ${ip} }" || true
   done
 
-  # Remove previous rules for this port (best-effort)
-  # We match by comment to avoid nuking unrelated rules.
-  while nft -a list chain inet sproxy input | grep -q 'comment "SPROXY"'; do
-    handle=$(nft -a list chain inet sproxy input | awk '/comment "SPROXY"/ {print $NF; exit}')
+  # Remove previous SPROXY rules (best-effort) by comment
+  while nft -a list chain inet filter input | grep -q 'comment "SPROXY"'; do
+    handle=$(nft -a list chain inet filter input | awk '/comment "SPROXY"/ {print $NF; exit}')
     [[ -n "${handle:-}" ]] || break
-    nft delete rule inet sproxy input handle "${handle}" || break
+    nft delete rule inet filter input handle "${handle}" || break
   done
 
-  nft add rule inet sproxy input ip saddr @allowed_ips tcp dport "${SS_SERVER_PORT}" accept comment "SPROXY"
-  nft add rule inet sproxy input ip saddr @allowed_ips udp dport "${SS_SERVER_PORT}" accept comment "SPROXY"
-  nft add rule inet sproxy input tcp dport "${SS_SERVER_PORT}" drop comment "SPROXY"
-  nft add rule inet sproxy input udp dport "${SS_SERVER_PORT}" drop comment "SPROXY"
+  nft add rule inet filter input ip saddr @ALLOWED_SPROXY tcp dport "${SS_SERVER_PORT}" accept comment "SPROXY"
+  nft add rule inet filter input ip saddr @ALLOWED_SPROXY udp dport "${SS_SERVER_PORT}" accept comment "SPROXY"
+  nft add rule inet filter input tcp dport "${SS_SERVER_PORT}" drop comment "SPROXY"
+  nft add rule inet filter input udp dport "${SS_SERVER_PORT}" drop comment "SPROXY"
 
   nft list ruleset >/dev/null
 }

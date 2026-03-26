@@ -42,6 +42,15 @@ sudo bash ./socks_second_server.sh server2/.env
 
 ## B) Подготовить server1 (RU) — после server2
 
+> Важно: если **server2 (EU)** уже был настроен ранее, не забудьте на server2 добавить IP этого server1 в allowlist nftables и перезапустить Shadowsocks.
+>
+> Пример (выполнять на server2):
+>
+> ```bash
+> nft add element inet filter ALLOWED_SPROXY { 72.56.64.212 }
+> systemctl restart shadowsocks-libev
+> ```
+
 1) SSH на server1.
 
 2) Склонировать репозиторий и перейти в папку:
