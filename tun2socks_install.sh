@@ -148,6 +148,25 @@ WantedBy=multi-user.target
 EOF
 }
 
+self_check() {
+  log "Self-check: verifying that default route is via ${TUN2SOCKS_TUN_DEV}"
+
+  ip link show "${TUN2SOCKS_TUN_DEV}" || true
+
+  # Determine which interface kernel will actually use for a public IP
+  local dev
+  dev=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')
+
+  if [[ "${dev:-}" != "${TUN2SOCKS_TUN_DEV}" ]]; then
+    echo "[tun2socks_install.sh] FAIL: ip route get 1.1.1.1 uses dev=${dev:-<none>} (expected ${TUN2SOCKS_TUN_DEV})." >&2
+    echo "[tun2socks_install.sh] Hint: check server2 allowlist (nft ALLOWED_SPROXY) and Shadowsocks reachability, then restart tun2socks." >&2
+    return 1
+  fi
+
+  log "OK: ip route get 1.1.1.1 uses dev=${dev}"
+  return 0
+}
+
 enable_service() {
   log "Reloading systemd and enabling tun2socks"
   systemctl daemon-reload
@@ -159,6 +178,8 @@ enable_service() {
   ip route show || true
   log "Routes (table lip):"
   ip route show table lip || true
+
+  self_check
 }
 
 main() {
