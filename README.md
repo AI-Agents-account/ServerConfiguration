@@ -74,14 +74,10 @@ cp server1/.env.example server1/.env && \
 
 Это проверка **только доступности порта** Shadowsocks на server2 (и того, что nft allowlist пропускает ваш IP). Она **не меняет маршрутизацию** и не создаёт tun-интерфейсы.
 
-Выполнять на server1 (подставьте IP/порт server2 из `server1/.env`):
+Выполнять на server1 (значения берутся автоматически из `server1/.env`):
 
 ```bash
-SSIP="<server2_ip>" \
-SSPORT="6666" \
-  timeout 3 bash -c 'cat < /dev/null > /dev/tcp/'"$SSIP"'/'"$SSPORT"'' \
-  && echo "OK: server2 port is reachable" \
-  || echo "FAIL: cannot connect to server2 port (check ALLOWED_SPROXY + service)"
+sudo bash ./server1/check_server2_proxy.sh server1/.env
 ```
 
 Если `FAIL`, то на server2 добавьте IP server1 в allowlist и перезапустите shadowsocks:
