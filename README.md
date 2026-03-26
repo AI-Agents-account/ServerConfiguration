@@ -25,12 +25,17 @@ git clone https://github.com/AI-Agents-account/ServerConfiguration.git && \
 sudo bash ./start.sh
 ```
 
-4) Настроить Shadowsocks (SOCKS) на server2:
+4) Подготовить конфиг для server2:
 
 ```bash
 cp server2/.env.example server2/.env && \
-  nano server2/.env && \
-  sudo bash ./socks_second_server.sh server2/.env
+  nano server2/.env
+```
+
+5) Запустить настройку Shadowsocks на server2:
+
+```bash
+sudo bash ./socks_second_server.sh server2/.env
 ```
 
 ---
@@ -58,20 +63,31 @@ sudo bash ./start.sh
 sudo bash /usr/local/projects/wireguard/wireguard-install.sh
 ```
 
-5) Настроить tun2socks на server1 (трафик через Shadowsocks server2):
+5) Подготовить конфиг для server1:
 
 ```bash
 cp server1/.env.example server1/.env && \
-  nano server1/.env && \
-  sudo bash ./tun2socks_install.sh server1/.env
+  nano server1/.env
 ```
 
-Проверка:
+6) Запустить настройку tun2socks на server1 (трафик через Shadowsocks server2):
 
 ```bash
-systemctl status tun2socks --no-pager -l && \
-  ip route show && \
-  ip route show table lip
+sudo bash ./tun2socks_install.sh server1/.env
+```
+
+7) Проверка:
+
+```bash
+systemctl status tun2socks --no-pager -l
+```
+
+```bash
+ip route show
+```
+
+```bash
+ip route show table lip
 ```
 
 ---
