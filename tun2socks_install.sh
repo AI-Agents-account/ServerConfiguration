@@ -100,44 +100,18 @@ TUNADDR=${TUN2SOCKS_TUN_ADDR}
 EOF
 }
 
-write_poststart_script() {
-  log "Writing /usr/local/bin/tun2socks-poststart.sh"
-  cat > /usr/local/bin/tun2socks-poststart.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+install_poststart_script() {
+  log "Installing tun2socks-poststart.sh to /usr/local/bin"
 
-# Expects EnvironmentFile=/etc/default/tun2socks
-: "${SSIP:?}"
-: "${IFACE:?}"
-: "${TUNDEV:?}"
+  local src_dir
+  src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-MIP=$(ip route show default 0.0.0.0/0 2>/dev/null | awk '/default/ {for (i=1;i<=NF;i++) if ($i=="via") {print $(i+1); exit}}')
-if [[ -z "${MIP}" ]]; then
-  echo "[tun2socks-poststart] ERROR: cannot detect default gateway (MIP)" >&2
-  exit 1
-fi
+  if [[ ! -f "${src_dir}/tun2socks-poststart.sh" ]]; then
+    echo "ERROR: tun2socks-poststart.sh not found next to tun2socks_install.sh" >&2
+    exit 1
+  fi
 
-LIP=$(ip -4 addr show dev "${IFACE}" | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)
-if [[ -z "${LIP}" ]]; then
-  echo "[tun2socks-poststart] ERROR: cannot detect local IPv4 on IFACE=${IFACE}" >&2
-  exit 1
-fi
-
-# Ensure primary route via IFACE exists as fallback
-ip route del default dev "${IFACE}" 2>/dev/null || true
-ip route replace default via "${MIP}" dev "${IFACE}" metric 200
-
-# Policy routing table for local IP
-ip rule add from "${LIP}" table lip 2>/dev/null || true
-ip route replace default via "${MIP}" dev "${IFACE}" table lip
-
-# Route to SS server directly via IFACE (so we don't tunnel the tunnel)
-ip route replace "${SSIP}/32" via "${MIP}" dev "${IFACE}"
-
-# Primary default route via tun
-ip route replace default dev "${TUNDEV}" metric 50
-EOF
-  chmod +x /usr/local/bin/tun2socks-poststart.sh
+  install -m 0755 "${src_dir}/tun2socks-poststart.sh" /usr/local/bin/tun2socks-poststart.sh
 }
 
 write_service() {
@@ -196,7 +170,7 @@ main() {
   enable_ip_forward
   ensure_rt_table
   write_defaults
-  write_poststart_script
+  install_poststart_script
   write_service
   enable_service
   log "Done."
