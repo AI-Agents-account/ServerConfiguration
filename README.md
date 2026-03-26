@@ -70,7 +70,28 @@ cp server1/.env.example server1/.env && \
   nano server1/.env
 ```
 
-6) Запустить настройку tun2socks на server1 (трафик через Shadowsocks server2):
+6) Проверка доступности server2 как прокси (БЕЗ настройки сетевых интерфейсов)
+
+Это проверка **только доступности порта** Shadowsocks на server2 (и того, что nft allowlist пропускает ваш IP). Она **не меняет маршрутизацию** и не создаёт tun-интерфейсы.
+
+Выполнять на server1 (подставьте IP/порт server2 из `server1/.env`):
+
+```bash
+SSIP="<server2_ip>" \
+SSPORT="6666" \
+  timeout 3 bash -c 'cat < /dev/null > /dev/tcp/'"$SSIP"'/'"$SSPORT"'' \
+  && echo "OK: server2 port is reachable" \
+  || echo "FAIL: cannot connect to server2 port (check ALLOWED_SPROXY + service)"
+```
+
+Если `FAIL`, то на server2 добавьте IP server1 в allowlist и перезапустите shadowsocks:
+
+```bash
+nft add element inet filter ALLOWED_SPROXY { <server1_public_ip> }
+systemctl restart shadowsocks-libev
+```
+
+7) Запустить настройку tun2socks на server1 (трафик через Shadowsocks server2):
 
 ```bash
 sudo bash ./tun2socks_install.sh server1/.env
