@@ -21,11 +21,12 @@ if [[ -z "${SSIP}" || -z "${SSPORT}" ]]; then
   exit 1
 fi
 
-echo "Checking TCP reachability of server2 Shadowsocks: ${SSIP}:${SSPORT}"
+TUNDEV="${TUN2SOCKS_TUN_DEV:-tun0}"
+
+echo "[1/3] Checking TCP reachability of server2 Shadowsocks: ${SSIP}:${SSPORT}"
 
 if timeout 3 bash -c 'cat < /dev/null > /dev/tcp/'"${SSIP}"'/'"${SSPORT}"''; then
   echo "OK: ${SSIP}:${SSPORT} is reachable from this server"
-  exit 0
 else
   echo "FAIL: cannot connect to ${SSIP}:${SSPORT}" >&2
   echo "Check on server2:" >&2
@@ -33,3 +34,32 @@ else
   echo "  - your server1 public IP is in nft allowlist (ALLOWED_SPROXY)" >&2
   exit 2
 fi
+
+echo "[2/3] Restarting tun2socks client on server1"
+if ! systemctl restart --now tun2socks; then
+  echo "FAIL: cannot start/restart tun2socks service on server1" >&2
+  exit 3
+fi
+
+echo "[3/3] Verifying routing + doing HTTP request through tun2socks"
+
+# Ensure kernel actually routes via tun device
+DEV_USED=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')
+if [[ "${DEV_USED:-}" != "${TUNDEV}" ]]; then
+  echo "FAIL: ip route get 1.1.1.1 uses dev=${DEV_USED:-<none>} (expected ${TUNDEV})." >&2
+  echo "Hint: check allowlist on server2 and restart shadowsocks-libev, then restart tun2socks." >&2
+  exit 4
+fi
+
+echo "OK: routing uses ${TUNDEV}"
+
+# Real HTTP request (should go via tun2socks)
+IP_OUT=$(curl -4 --max-time 10 -sS https://api.ipify.org || true)
+if [[ -z "${IP_OUT}" ]]; then
+  echo "FAIL: HTTP request via tun2socks did not succeed (curl to api.ipify.org)." >&2
+  exit 5
+fi
+
+echo "OK: HTTP works via tun2socks. Observed public IP: ${IP_OUT}"
+exit 0
+
