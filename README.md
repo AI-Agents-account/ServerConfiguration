@@ -47,7 +47,7 @@ sudo bash ./socks_second_server.sh server2/.env
 > Пример (выполнять на server2):
 >
 > ```bash
-> nft add element inet sproxy allowed_ips { 72.56.64.212 }
+> nft add element inet filter ALLOWED_SPROXY { 72.56.64.212 }
 > systemctl restart shadowsocks-libev
 > ```
 
