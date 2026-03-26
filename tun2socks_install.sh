@@ -80,12 +80,8 @@ EOF
   sysctl --system >/dev/null
 }
 
-ensure_rt_table() {
-  if ! grep -qE '^\s*20\s+lip\s*$' /etc/iproute2/rt_tables; then
-    log "Adding routing table 'lip' (id 20) to /etc/iproute2/rt_tables"
-    echo "20 lip" >> /etc/iproute2/rt_tables
-  fi
-}
+# NOTE: We intentionally do NOT create a separate policy routing table.
+# Keeping things minimal: default via tun + explicit /32 routes for SS server and DNS via IFACE.
 
 write_defaults() {
   log "Writing /etc/default/tun2socks"
@@ -134,8 +130,6 @@ ExecStart=/usr/local/bin/tun2socks -device tun://${TUNDEV} -proxy ss://${SSMETHO
 
 ExecStartPost=/usr/local/bin/tun2socks-poststart.sh
 
-ExecStopPost=-/sbin/ip r flush table lip
-ExecStopPost=-/sbin/ip rule delete table lip
 ExecStopPost=-/sbin/ip link set dev ${TUNDEV} down
 ExecStopPost=-/sbin/ip link del dev ${TUNDEV}
 ExecStopPost=-/sbin/ip r del ${SSIP}/32 dev ${IFACE}
@@ -176,8 +170,6 @@ enable_service() {
 
   log "Routes (main):"
   ip route show || true
-  log "Routes (table lip):"
-  ip route show table lip || true
 
   self_check
 }
@@ -189,7 +181,6 @@ main() {
   install_go
   build_and_install_tun2socks
   enable_ip_forward
-  ensure_rt_table
   write_defaults
   install_poststart_script
   write_service
