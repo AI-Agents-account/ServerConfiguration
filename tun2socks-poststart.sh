@@ -29,5 +29,12 @@ ip route replace default via "${MIP}" dev "${IFACE}" table lip
 # Route to SS server directly via IFACE (so we don't tunnel the tunnel)
 ip route replace "${SSIP}/32" via "${MIP}" dev "${IFACE}"
 
+# Also keep DNS resolvers reachable via IFACE.
+# Otherwise DNS may try to go through tun2socks (often UDP) and hang.
+while read -r ns; do
+  [[ -n "${ns}" ]] || continue
+  ip route replace "${ns}/32" via "${MIP}" dev "${IFACE}" || true
+done < <(awk '/^nameserver/{print $2}' /etc/resolv.conf | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
+
 # Primary default route via tun
 ip route replace default dev "${TUNDEV}" metric 50

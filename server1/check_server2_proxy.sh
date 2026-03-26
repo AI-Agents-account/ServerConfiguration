@@ -43,6 +43,7 @@ echo "[3/4] Verifying that routing really uses ${TUNDEV}"
 DEV_USED=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')
 if [[ "${DEV_USED:-}" != "${TUNDEV}" ]]; then
   echo "FAIL: ip route get 1.1.1.1 uses dev=${DEV_USED:-<none>} (expected ${TUNDEV})." >&2
+  echo "Hint: check allowlist on server2 and restart shadowsocks-libev, then restart tun2socks." >&2
   exit 4
 fi
 
