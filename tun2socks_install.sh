@@ -16,7 +16,12 @@ load_env() {
     export $(grep -v '^#' ./.env | xargs -d '\n' || true)
   fi
 
-  : "${TUN2SOCKS_IFACE:=eth0}"
+  # Auto-detect primary interface if not provided
+  if [[ -z "${TUN2SOCKS_IFACE:-}" ]]; then
+    TUN2SOCKS_IFACE="$(ip route show default 0.0.0.0/0 2>/dev/null | awk '/default/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+    [[ -n "${TUN2SOCKS_IFACE}" ]] || TUN2SOCKS_IFACE="eth0"
+  fi
+
   : "${TUN2SOCKS_TUN_DEV:=tun0}"
   : "${TUN2SOCKS_TUN_ADDR:=192.168.0.33/24}"
 

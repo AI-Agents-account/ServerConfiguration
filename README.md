@@ -1,88 +1,78 @@
 # ServerConfiguration
 
-Минимальный репозиторий для быстрой подготовки нового Ubuntu VPS к дальнейшей настройке.
+Репозиторий для быстрой подготовки нового Ubuntu VPS (20.04/22.04) к дальнейшей настройке.
 
-## Быстрый старт (минимум шагов)
+## 0) Подключение к серверу
 
-> Предположения: Ubuntu 20.04/22.04, есть доступ по SSH с sudo.
+```bash
+ssh <user>@<server_ip>
+```
 
-1) Склонировать репозиторий на сервер и перейти в папку:
+## 1) Склонировать репозиторий
 
 ```bash
 git clone https://github.com/AI-Agents-account/ServerConfiguration.git
 cd ServerConfiguration
 ```
 
-2) Запустить базовую предустановку (без диалогов):
+## 2) Базовая подготовка сервера (Docker + Compose + папки)
 
 ```bash
 sudo bash ./start.sh
 ```
 
-Что делает `start.sh`:
-- создаёт директорию `/usr/local/projects`
-- обновляет систему (apt update/upgrade)
-- ставит Docker Engine + Docker Compose plugin (официальный репозиторий Docker)
-- скачивает `wireguard-install.sh` в `/usr/local/projects/wireguard/` (только скачивание; запуск отдельно)
+## 3) WireGuard (скачан инсталлятор)
 
-## WireGuard
+`start.sh` **скачивает** установочный скрипт WireGuard сюда:
 
-Скрипт установки WireGuard скачивается сюда:
+```bash
+ls -la /usr/local/projects/wireguard/wireguard-install.sh
+```
 
-- `/usr/local/projects/wireguard/wireguard-install.sh`
-
-Далее его можно запускать вручную (он интерактивный по природе):
+Далее запуск (инсталлятор интерактивный):
 
 ```bash
 sudo bash /usr/local/projects/wireguard/wireguard-install.sh
 ```
 
-## SOCKS (shadowsocks-libev) — второй сервер
+## 4) SOCKS (Shadowsocks) на втором сервере
 
-Скрипт: `./socks_second_server.sh`
-
-1) Скопируйте пример окружения и заполните значения:
+1) Подготовить конфиг:
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-2) Запуск:
+2) Запуск установки/настройки:
 
 ```bash
 sudo bash ./socks_second_server.sh
 ```
 
-Скрипт:
-- ставит `shadowsocks-libev` и `nftables`
-- создаёт `/etc/shadowsocks-libev/config.json` из переменных окружения
-- настраивает nftables так, чтобы порт прокси был доступен только с разрешённых IP
-- включает и запускает сервис `shadowsocks-libev`
+## 5) tun2socks
 
-## tun2socks
-
-Скрипт: `./tun2socks_install.sh`
-
-1) Заполните `.env` (используется тот же файл):
+1) Подготовить конфиг (используется тот же `.env`):
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-2) Установка и настройка:
+2) Установка и включение сервиса:
 
 ```bash
 sudo bash ./tun2socks_install.sh
 ```
 
-Скрипт:
-- ставит `snapd` и `go` через snap
-- собирает `tun2socks` из исходников и кладёт бинарник в `/usr/local/bin/tun2socks`
-- включает IPv4 forwarding
-- создаёт unit `/etc/systemd/system/tun2socks.service` и окружение `/etc/default/tun2socks`
+Проверка статуса:
+
+```bash
+systemctl status tun2socks --no-pager -l
+ip route show
+ip route show table lip
+```
 
 ## Docker Compose
 
-`docker-compose.yml` будет добавлен **отдельной итерацией** (по вашему решению — какие именно контейнеры должны стартовать “из коробки”).
+`docker-compose.yml` добавим отдельной итерацией (по вашему списку контейнеров/портов/переменных).
