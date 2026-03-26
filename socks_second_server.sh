@@ -11,9 +11,10 @@ require_root() {
 }
 
 load_env() {
-  if [[ -f ./.env ]]; then
+  local env_file="${1:-${ENV_FILE:-./.env}}"
+  if [[ -f "${env_file}" ]]; then
     # shellcheck disable=SC2046
-    export $(grep -v '^#' ./.env | xargs -d '\n' || true)
+    export $(grep -v '^#' "${env_file}" | xargs -d '\n' || true)
   fi
 
   : "${ALLOWED_IPS:?ALLOWED_IPS is required (CSV list)}"
@@ -90,7 +91,7 @@ enable_service() {
 
 main() {
   require_root
-  load_env
+  load_env "${1:-}"
   install_packages
   write_config
   configure_nftables
