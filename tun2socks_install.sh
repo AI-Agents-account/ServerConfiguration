@@ -89,11 +89,17 @@ ensure_rt_table() {
 
 write_defaults() {
   log "Writing /etc/default/tun2socks"
+  # If user provided a proxy URL explicitly (e.g. socks5://127.0.0.1:1080), use it.
+  # Otherwise default to Shadowsocks URL.
+  local proxy_url
+  proxy_url="${TUN_PROXY_URL:-ss://${TUN_SSMETHOD}:${TUN_SSPASSWORD}@${TUN_SSIP}:${TUN_SSPORT}}"
+
   cat > /etc/default/tun2socks <<EOF
 SSIP=${TUN_SSIP}
 SSPORT=${TUN_SSPORT}
 SSPASSWORD=${TUN_SSPASSWORD}
 SSMETHOD=${TUN_SSMETHOD}
+PROXY_URL=${proxy_url}
 IFACE=${TUN2SOCKS_IFACE}
 TUNDEV=${TUN2SOCKS_TUN_DEV}
 TUNADDR=${TUN2SOCKS_TUN_ADDR}
@@ -130,7 +136,7 @@ ExecStartPre=-/sbin/ip tuntap add mode tun dev ${TUNDEV}
 ExecStartPre=/sbin/ip addr replace ${TUNADDR} dev ${TUNDEV}
 ExecStartPre=/sbin/ip link set dev ${TUNDEV} up
 
-ExecStart=/usr/local/bin/tun2socks -device tun://${TUNDEV} -proxy ss://${SSMETHOD}:${SSPASSWORD}@${SSIP}:${SSPORT}
+ExecStart=/usr/local/bin/tun2socks -device tun://${TUNDEV} -proxy ${PROXY_URL}
 
 ExecStartPost=/usr/local/bin/tun2socks-poststart.sh
 
