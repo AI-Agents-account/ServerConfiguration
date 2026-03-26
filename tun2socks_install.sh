@@ -100,6 +100,20 @@ TUNADDR=${TUN2SOCKS_TUN_ADDR}
 EOF
 }
 
+install_poststart_script() {
+  log "Installing tun2socks-poststart.sh to /usr/local/bin"
+
+  local src_dir
+  src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  if [[ ! -f "${src_dir}/tun2socks-poststart.sh" ]]; then
+    echo "ERROR: tun2socks-poststart.sh not found next to tun2socks_install.sh" >&2
+    exit 1
+  fi
+
+  install -m 0755 "${src_dir}/tun2socks-poststart.sh" /usr/local/bin/tun2socks-poststart.sh
+}
+
 write_service() {
   log "Writing /etc/systemd/system/tun2socks.service"
   cat > /etc/systemd/system/tun2socks.service <<'EOF'
@@ -113,21 +127,12 @@ User=root
 EnvironmentFile=/etc/default/tun2socks
 
 ExecStartPre=-/sbin/ip tuntap add mode tun dev ${TUNDEV}
-ExecStartPre=/sbin/ip addr add ${TUNADDR} dev ${TUNDEV}
+ExecStartPre=/sbin/ip addr replace ${TUNADDR} dev ${TUNDEV}
 ExecStartPre=/sbin/ip link set dev ${TUNDEV} up
 
 ExecStart=/usr/local/bin/tun2socks -device tun://${TUNDEV} -proxy ss://${SSMETHOD}:${SSPASSWORD}@${SSIP}:${SSPORT}
 
-# Keep main route on IFACE as secondary, route SS server directly via IFACE
-ExecStartPost=/bin/bash -c 'MIP=$(ip r l | grep "default via" | awk "{print \$3}" | head -n1); \
-  LIP=$(ip -4 a l ${IFACE} | awk "/inet /{ print \$2 }" | cut -f1 -d"/" | head -n1); \
-  ip r del default dev ${IFACE} 2>/dev/null || true; \
-  ip r add default via $MIP dev ${IFACE} metric 200; \
-  ip rule add from $LIP table lip 2>/dev/null || true; \
-  ip r replace default via $MIP dev ${IFACE} table lip; \
-  ip r replace ${SSIP}/32 via $MIP dev ${IFACE}'
-
-ExecStartPost=/sbin/ip r replace default dev ${TUNDEV} metric 50
+ExecStartPost=/usr/local/bin/tun2socks-poststart.sh
 
 ExecStopPost=-/sbin/ip r flush table lip
 ExecStopPost=-/sbin/ip rule delete table lip
@@ -165,6 +170,7 @@ main() {
   enable_ip_forward
   ensure_rt_table
   write_defaults
+  install_poststart_script
   write_service
   enable_service
   log "Done."
