@@ -90,6 +90,21 @@ ip route show
 ip route show table lip
 ```
 
+## Временно выключить/включить маршрутизацию через server2 (tun2socks)
+
+Выключить (трафик пойдёт по обычному default route через eth0):
+
+```bash
+ip link set tun0 down
+```
+
+Включить обратно:
+
+```bash
+systemctl restart --now tun2socks
+```
+
+
 ---
 
 ## Docker Compose
