@@ -22,7 +22,7 @@ if [[ -z "${SSIP}" || -z "${SSPORT}" ]]; then
   exit 1
 fi
 
-echo "[1/3] Checking TCP reachability of server2 Shadowsocks: ${SSIP}:${SSPORT}"
+echo "[1/4] Checking TCP reachability of server2 Shadowsocks: ${SSIP}:${SSPORT}"
 if timeout 3 bash -c 'cat < /dev/null > /dev/tcp/'"${SSIP}"'/'"${SSPORT}"''; then
   echo "OK: ${SSIP}:${SSPORT} is reachable from this server"
 else
@@ -33,14 +33,13 @@ else
   exit 2
 fi
 
-echo "[2/3] Restarting tun2socks client on server1"
+echo "[2/4] Restarting tun2socks client on server1"
 if ! systemctl restart --now tun2socks; then
   echo "FAIL: cannot start/restart tun2socks service on server1" >&2
   exit 3
 fi
 
-echo "[3/3] Verifying routing + doing HTTP request through tun2socks"
-
+echo "[3/4] Verifying that routing really uses ${TUNDEV}"
 DEV_USED=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')
 if [[ "${DEV_USED:-}" != "${TUNDEV}" ]]; then
   echo "FAIL: ip route get 1.1.1.1 uses dev=${DEV_USED:-<none>} (expected ${TUNDEV})." >&2
@@ -50,10 +49,30 @@ fi
 
 echo "OK: routing uses ${TUNDEV}"
 
-IP_OUT=$(curl -4 --max-time 10 -sS https://api.ipify.org || true)
-if [[ -z "${IP_OUT}" ]]; then
-  echo "FAIL: HTTP request did not succeed (curl to api.ipify.org)." >&2
+echo "[4/4] Connectivity diagnostics through tun2socks"
+
+echo "- Test A: plain HTTP to IP (no DNS): http://1.1.1.1"
+if ! curl -4 --max-time 10 -sS -o /dev/null http://1.1.1.1; then
+  echo "FAIL: cannot reach http://1.1.1.1 via tun2socks (no DNS involved)." >&2
   exit 5
+fi
+
+echo "OK: Test A passed"
+
+echo "- Test B: DNS resolution for api.ipify.org"
+RESOLVED_IP=$(timeout 5 getent ahostsv4 api.ipify.org 2>/dev/null | awk '{print $1; exit}' || true)
+if [[ -z "${RESOLVED_IP}" ]]; then
+  echo "FAIL: DNS resolution for api.ipify.org failed/timed out." >&2
+  exit 6
+fi
+
+echo "OK: api.ipify.org resolved to ${RESOLVED_IP}"
+
+echo "- Test C: HTTPS to api.ipify.org with --resolve (bypass DNS in curl)"
+IP_OUT=$(curl -4 --max-time 10 -sS --resolve "api.ipify.org:443:${RESOLVED_IP}" https://api.ipify.org || true)
+if [[ -z "${IP_OUT}" ]]; then
+  echo "FAIL: HTTPS request did not succeed even with --resolve (likely tunnel/proxy issue)." >&2
+  exit 7
 fi
 
 echo "OK: HTTP works via tun2socks. Observed public IP: ${IP_OUT}"
