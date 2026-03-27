@@ -39,7 +39,7 @@ main() {
   apt-get update -y
   DEBIAN_FRONTEND=noninteractive apt-get install -y nftables
 
-  local gw server_ip dns_bypass
+  local gw server_ip dns_bypass ssh_bypass
   gw="$(ip route show default | awk '/default/ {print $3; exit}')"
   server_ip="$(ip -4 addr show dev "${TUN2SOCKS_IFACE}" | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
   dns_bypass="$(
@@ -47,6 +47,15 @@ main() {
       resolvectl dns "${TUN2SOCKS_IFACE}" 2>/dev/null || true
       awk '/^nameserver / {print $2}' /etc/resolv.conf 2>/dev/null || true
     } | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '^127\.' | sort -u | paste -sd, -
+  )"
+  ssh_bypass="$(
+    (
+      ss -tn state established '( sport = :22 )' 2>/dev/null \
+        | awk 'NR>1 {print $5}' \
+        | sed 's/\[//; s/\]//; s/:[0-9][0-9]*$//' \
+        | grep -E '^[0-9]+(\.[0-9]+){3}$' \
+        | sort -u | paste -sd, -
+    ) || true
   )"
 
   [[ -n "$gw" ]] || { echo "ERROR: failed to detect default gateway" >&2; exit 1; }
@@ -63,15 +72,17 @@ EOF
   cat >/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
 #!/usr/bin/env bash
 set -e
-ip route replace default dev ${TUN2SOCKS_TUN_DEV} table 100
-ip rule del priority 1000 2>/dev/null || true
-ip rule add priority 1000 fwmark 0x1 lookup 100
 
-systemctl enable --now nftables >/dev/null 2>&1 || true
-nft list table inet tun2socks >/dev/null 2>&1 || nft add table inet tun2socks
-nft flush table inet tun2socks
-nft add set inet tun2socks bypass4 '{ type ipv4_addr; flags interval; }'
-nft add element inet tun2socks bypass4 '{ 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.0/24, ${TUN_SSIP}/32, ${gw}/32, ${server_ip}/32 }'
+# Clean up remnants from the old policy-routing mode if they exist.
+ip rule del priority 1000 2>/dev/null || true
+ip route flush table 100 2>/dev/null || true
+nft delete table inet tun2socks 2>/dev/null || true
+
+# Keep direct reachability to the uplink, Shadowsocks server, active SSH peers,
+# and selected bypass destinations via the real gateway on ${TUN2SOCKS_IFACE}.
+ip route replace ${gw}/32 dev ${TUN2SOCKS_IFACE}
+ip route replace ${TUN_SSIP}/32 via ${gw} dev ${TUN2SOCKS_IFACE}
+ip route replace 169.254.169.0/24 dev ${TUN2SOCKS_IFACE} || true
 EOF
 
   if [[ -n "$dns_bypass" ]]; then
@@ -79,24 +90,37 @@ EOF
     for dns_ip in "${DNS_BYPASS_ARR[@]}"; do
       [[ -n "$dns_ip" ]] || continue
       cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
-nft add element inet tun2socks bypass4 '{ ${dns_ip} }' || true
+ip route replace ${dns_ip}/32 via ${gw} dev ${TUN2SOCKS_IFACE} || true
+EOF
+    done
+  fi
+
+  if [[ -n "$ssh_bypass" ]]; then
+    IFS=',' read -r -a SSH_BYPASS_ARR <<< "$ssh_bypass"
+    for ssh_ip in "${SSH_BYPASS_ARR[@]}"; do
+      [[ -n "$ssh_ip" ]] || continue
+      cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
+ip route replace ${ssh_ip}/32 via ${gw} dev ${TUN2SOCKS_IFACE} || true
 EOF
     done
   fi
 
   if [[ -n "$FULL_TUNNEL_BYPASS_IPS" ]]; then
-    cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
-nft add element inet tun2socks bypass4 '{ ${FULL_TUNNEL_BYPASS_IPS} }' || true
+    IFS=',' read -r -a FULL_BYPASS_ARR <<< "$FULL_TUNNEL_BYPASS_IPS"
+    for bypass_ip in "${FULL_BYPASS_ARR[@]}"; do
+      bypass_ip="${bypass_ip// /}"
+      [[ -n "$bypass_ip" ]] || continue
+      cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
+ip route replace ${bypass_ip} via ${gw} dev ${TUN2SOCKS_IFACE} || true
 EOF
+    done
   fi
 
-  cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<'EOF'
-nft 'add chain inet tun2socks output { type route hook output priority mangle; policy accept; }'
-nft add rule inet tun2socks output meta mark 0x1 return
-nft add rule inet tun2socks output ip daddr @bypass4 return
-nft add rule inet tun2socks output tcp sport 22 return
-nft add rule inet tun2socks output oifname "lo" return
-nft add rule inet tun2socks output meta mark set 0x1
+  cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
+# Main routing model for universal ingress use-cases:
+# prefer tun0 for all traffic, keep eth0 as lower-priority fallback.
+ip route replace default dev ${TUN2SOCKS_TUN_DEV} metric 50
+ip route replace default via ${gw} dev ${TUN2SOCKS_IFACE} metric 200
 EOF
   chmod 0755 /usr/local/sbin/tun2socks-apply-full-routing.sh
 
