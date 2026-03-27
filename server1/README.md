@@ -18,8 +18,7 @@ sudo bash ./start.sh
 ## 1. Подготовить `.env`
 
 ```bash
-cp server1/.env.example server1/.env
-nano server1/.env
+cp server1/.env.example server1/.env && nano server1/.env
 ```
 
 Минимально нужны:
@@ -37,8 +36,15 @@ TUN_SSMETHOD="chacha20-ietf-poly1305"
 
 ### Safe mode
 
+Применение:
+
 ```bash
 sudo bash ./server1/setup.sh safe server1/.env
+```
+
+Проверка:
+
+```bash
 sudo bash ./server1/check_via_server2.sh server1/.env safe
 ```
 
@@ -70,8 +76,15 @@ sudo via-server2 wget -O- https://ifconfig.me
 
 > Делать только при наличии аварийного/console-доступа.
 
+Применение:
+
 ```bash
 sudo bash ./server1/setup.sh full server1/.env
+```
+
+Проверка:
+
+```bash
 sudo bash ./server1/check_via_server2.sh server1/.env full
 ```
 

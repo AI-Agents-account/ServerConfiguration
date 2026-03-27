@@ -28,10 +28,21 @@ sudo bash ./start.sh
 
 ### 1. Настроить server2
 
+Инициализация:
+
 ```bash
 sudo bash ./start.sh
-cp server2/.env.example server2/.env
-nano server2/.env
+```
+
+Подготовка конфига:
+
+```bash
+cp server2/.env.example server2/.env && nano server2/.env
+```
+
+Применение:
+
+```bash
 sudo bash ./server2/setup.sh server2/.env
 ```
 
@@ -44,10 +55,21 @@ sudo nft list set inet filter ALLOWED_SPROXY
 
 ### 2. Настроить server1 в safe mode
 
+Инициализация:
+
 ```bash
 sudo bash ./start.sh
-cp server1/.env.example server1/.env
-nano server1/.env
+```
+
+Подготовка конфига:
+
+```bash
+cp server1/.env.example server1/.env && nano server1/.env
+```
+
+Применение:
+
+```bash
 sudo bash ./server1/setup.sh safe server1/.env
 ```
 
@@ -62,9 +84,21 @@ sudo via-server2 curl -4 https://ifconfig.me
 
 > Внимание: full-tunnel может повлиять на SSH и другой исходящий трафик. Делать только при наличии аварийного доступа через консоль провайдера.
 
+Инициализация:
+
 ```bash
 sudo bash ./start.sh
+```
+
+Применение:
+
+```bash
 sudo bash ./server1/setup.sh full server1/.env
+```
+
+Проверка:
+
+```bash
 sudo bash ./server1/check_via_server2.sh server1/.env full
 ```
 
