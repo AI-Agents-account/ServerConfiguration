@@ -36,9 +36,7 @@ sudo nft list set inet filter ALLOWED_SPROXY
 ```bash
 cp server1/.env.example server1/.env
 nano server1/.env
-sudo bash ./server1/install_tun2socks_binary.sh
-sudo bash ./server1/install_sslocal.sh server1/.env
-sudo bash ./server1/install_safe_mode.sh server1/.env
+sudo bash ./server1/setup.sh safe server1/.env
 ```
 
 Проверить:
@@ -53,7 +51,7 @@ sudo via-server2 curl -4 https://ifconfig.me
 > Внимание: full-tunnel может повлиять на SSH и другой исходящий трафик. Делать только при наличии аварийного доступа через консоль провайдера.
 
 ```bash
-sudo bash ./server1/install_full_tunnel_mode.sh server1/.env
+sudo bash ./server1/setup.sh full server1/.env
 sudo bash ./server1/check_via_server2.sh server1/.env full
 ```
 

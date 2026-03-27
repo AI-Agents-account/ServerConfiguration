@@ -12,9 +12,9 @@ nano server2/.env
 Минимально нужны:
 
 ```dotenv
-ALLOWED_IPS="72.56.233.174"
+ALLOWED_IPS="72.56.233.174,95.140.159.63"
 SS_SERVER_PORT=6666
-SS_PASSWORD="changeMeStrongPassword"
+SS_PASSWORD="testPassword"
 SS_METHOD="chacha20-ietf-poly1305"
 SS_TIMEOUT=86400
 ```

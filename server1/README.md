@@ -23,32 +23,12 @@ TUN_SSMETHOD="chacha20-ietf-poly1305"
 
 ---
 
-## 2. Установить бинарник tun2socks
+## 2. Одна команда настройки: safe/full
+
+### Safe mode
 
 ```bash
-sudo bash ./server1/install_tun2socks_binary.sh
-```
-
----
-
-## 3. Настроить ss-local
-
-```bash
-sudo bash ./server1/install_sslocal.sh server1/.env
-```
-
-Проверка:
-
-```bash
-curl -4 --socks5-hostname 127.0.0.1:1080 -s https://ifconfig.me
-```
-
----
-
-## 4A. Safe mode
-
-```bash
-sudo bash ./server1/install_safe_mode.sh server1/.env
+sudo bash ./server1/setup.sh safe server1/.env
 sudo bash ./server1/check_via_server2.sh server1/.env safe
 ```
 
@@ -60,6 +40,8 @@ sudo via-server2 wget -O- https://ifconfig.me
 ```
 
 ### Что делает safe mode
+- устанавливает `tun2socks`
+- настраивает `ss-local`
 - поднимает `tun0`
 - создаёт policy routing table `100`
 - отправляет через туннель только трафик пользователя `tunroute`
@@ -67,12 +49,12 @@ sudo via-server2 wget -O- https://ifconfig.me
 
 ---
 
-## 4B. Full-tunnel mode
+### Full-tunnel mode
 
 > Делать только при наличии аварийного/console-доступа.
 
 ```bash
-sudo bash ./server1/install_full_tunnel_mode.sh server1/.env
+sudo bash ./server1/setup.sh full server1/.env
 sudo bash ./server1/check_via_server2.sh server1/.env full
 ```
 
