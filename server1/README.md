@@ -44,8 +44,15 @@ sudo bash ./server1/check_via_server2.sh server1/.env safe
 
 Запуск команд через туннель:
 
+Проверка через `curl`:
+
 ```bash
 sudo via-server2 curl -4 https://ifconfig.me
+```
+
+Проверка через `wget`:
+
+```bash
 sudo via-server2 wget -O- https://ifconfig.me
 ```
 
