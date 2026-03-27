@@ -1,138 +1,115 @@
 # ServerConfiguration
 
-Быстрая подготовка **двух серверов**:
-- **server1 (RU / разрешённый)** — сервер, с которого разрешён доступ.
-- **server2 (EU / зарубежный)** — сервер, который принимает трафик от server1 (Shadowsocks) и используется как апстрим для tun2socks.
+Настройка связки:
 
-> Предположения: Ubuntu 20.04/22.04, SSH + sudo.
+- **server2** — Shadowsocks server (`shadowsocks-libev`)
+- **server1** — клиентская сторона (`ss-local` + `tun2socks`)
 
----
+## Структура
 
-## A) Подготовить server2 (EU) — сначала
+- `server2/` — настройка сервера Shadowsocks
+- `server1/` — настройка клиента на базе `ss-local + tun2socks`
 
-1) SSH на server2.
+См. также:
+- `server2/README.md`
+- `server1/README.md`
 
-2) Склонировать репозиторий и перейти в папку:
+## Рекомендуемый порядок
 
-```bash
-git clone https://github.com/AI-Agents-account/ServerConfiguration.git && \
-  cd ServerConfiguration
-```
-
-3) Базовая подготовка (Docker + Compose + папки):
+### 1. Настроить server2
 
 ```bash
-sudo bash ./start.sh
-```
-
-4) Подготовить конфиг для server2:
-
-```bash
-cp server2/.env.example server2/.env && \
-  nano server2/.env
-```
-
-5) Запустить настройку Shadowsocks на server2:
-
-```bash
+cp server2/.env.example server2/.env
+nano server2/.env
 sudo bash ./socks_second_server.sh server2/.env
 ```
 
----
-
-## B) Подготовить server1 (RU) — после server2
-
-> Важно: если **server2 (EU)** уже был настроен ранее, не забудьте на server2 добавить IP этого server1 в allowlist nftables и перезапустить Shadowsocks.
->
-> Пример (выполнять на server2):
->
-> ```bash
-> nft add element inet filter ALLOWED_SPROXY { 72.56.64.212 }
-> systemctl restart shadowsocks-libev
-> ```
-
-1) SSH на server1.
-
-2) Склонировать репозиторий и перейти в папку:
+Проверить:
 
 ```bash
-git clone https://github.com/AI-Agents-account/ServerConfiguration.git && \
-  cd ServerConfiguration
+systemctl status shadowsocks-libev --no-pager
+sudo nft list set inet filter ALLOWED_SPROXY
 ```
 
-3) Базовая подготовка (Docker + Compose + папки):
+### 2. Настроить server1 в safe mode
 
 ```bash
-sudo bash ./start.sh
+cp server1/.env.example server1/.env
+nano server1/.env
+sudo bash ./server1/setup.sh safe server1/.env
 ```
 
-4) WireGuard (инсталлятор скачан `start.sh`, запуск интерактивный):
+Проверить:
 
 ```bash
-sudo bash /usr/local/projects/wireguard/wireguard-install.sh
+sudo bash ./server1/check_via_server2.sh server1/.env safe
+sudo via-server2 curl -4 https://ifconfig.me
 ```
 
-5) Подготовить конфиг для server1:
+### 3. Перевести server1 в full-tunnel mode (опционально)
+
+> Внимание: full-tunnel может повлиять на SSH и другой исходящий трафик. Делать только при наличии аварийного доступа через консоль провайдера.
 
 ```bash
-cp server1/.env.example server1/.env && \
-  nano server1/.env
+sudo bash ./server1/setup.sh full server1/.env
+sudo bash ./server1/check_via_server2.sh server1/.env full
 ```
-
-6) Проверка доступности server2 как прокси (БЕЗ настройки сетевых интерфейсов)
-
-Это проверка **только доступности порта** Shadowsocks на server2 (и того, что nft allowlist пропускает ваш IP). Она **не меняет маршрутизацию** и не создаёт tun-интерфейсы.
-
-Выполнять на server1 (значения берутся автоматически из `server1/.env`):
-
-```bash
-sudo bash ./server1/check_server2_proxy.sh server1/.env
-```
-
-Если `FAIL`, то на server2 добавьте IP server1 в allowlist и перезапустите shadowsocks:
-
-```bash
-nft add element inet filter ALLOWED_SPROXY { <server1_public_ip> }
-systemctl restart shadowsocks-libev
-```
-
-7) Запустить настройку tun2socks на server1 (трафик через Shadowsocks server2):
-
-```bash
-sudo bash ./tun2socks_install.sh server1/.env
-```
-
-7) Проверка:
-
-```bash
-systemctl status tun2socks --no-pager -l
-```
-
-```bash
-ip route show
-```
-
-```bash
-ip route show table lip
-```
-
-## Временно выключить/включить маршрутизацию через server2 (tun2socks)
-
-Выключить (трафик пойдёт по обычному default route через eth0):
-
-```bash
-ip link set tun0 down
-```
-
-Включить обратно:
-
-```bash
-systemctl restart --now tun2socks
-```
-
 
 ---
 
-## Docker Compose
+## Что выбрать
 
-`docker-compose.yml` добавим отдельной итерацией (по вашему списку контейнеров/портов/переменных).
+### Safe mode
+Рекомендуется по умолчанию.
+
+- туннель работает только для отдельного системного пользователя `tunroute`
+- команды через туннель запускаются так:
+
+```bash
+sudo via-server2 curl -4 https://ifconfig.me
+```
+
+Подходит для:
+- безопасной проверки
+- выборочного трафика
+- сценариев, где нельзя рисковать SSH-доступом
+
+### Full-tunnel mode
+Весь исходящий трафик сервера уводится в `tun2socks`, кроме явно исключённого.
+
+Подходит только если:
+- есть консольный доступ к серверу
+- вы понимаете последствия policy routing / nftables
+- нужно увести наружу именно весь egress
+
+---
+
+## Smoke tests
+
+### SOCKS-проверка
+
+```bash
+curl -4 --socks5-hostname 127.0.0.1:1080 -s https://ifconfig.me
+```
+
+Ожидаемый результат: IP `server2`.
+
+### Safe mode
+
+```bash
+sudo via-server2 curl -4 -s https://ifconfig.me
+```
+
+### Full mode
+
+```bash
+curl -4 -s https://ifconfig.me
+```
+
+---
+
+## Важное замечание
+
+В этом репозитории:
+- **safe mode** соответствует реально проверенной рабочей схеме
+- **full-tunnel mode** добавлен как отдельная инсталляция и требует осторожного ввода в эксплуатацию

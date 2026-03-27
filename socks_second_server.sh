@@ -80,8 +80,11 @@ configure_nftables() {
   nft add rule inet filter input ip saddr @ALLOWED_SPROXY udp dport "${SS_SERVER_PORT}" accept comment "SPROXY"
   nft add rule inet filter input tcp dport "${SS_SERVER_PORT}" drop comment "SPROXY"
   nft add rule inet filter input udp dport "${SS_SERVER_PORT}" drop comment "SPROXY"
+}
 
-  nft list ruleset >/dev/null
+persist_nftables_rules() {
+  log "Persisting nftables rules to /etc/nftables.conf"
+  nft list ruleset > /etc/nftables.conf
 }
 
 enable_service() {
@@ -97,6 +100,7 @@ main() {
   install_packages
   write_config
   configure_nftables
+  persist_nftables_rules
   enable_service
   log "Done."
 }
