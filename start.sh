@@ -25,6 +25,7 @@ install_prereqs() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ca-certificates \
     curl \
+    git \
     gnupg \
     lsb-release \
     inetutils-traceroute

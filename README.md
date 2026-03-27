@@ -10,6 +10,10 @@
 - `server2/` — настройка сервера Shadowsocks
 - `server1/` — настройка клиента на базе `ss-local + tun2socks`
 
+См. также:
+- `server2/README.md`
+- `server1/README.md`
+
 ## Рекомендуемый порядок
 
 ### 1. Настроить server2
