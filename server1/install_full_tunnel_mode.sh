@@ -69,20 +69,30 @@ ip addr replace ${TUN2SOCKS_TUN_ADDR} dev ${TUN2SOCKS_TUN_DEV}
 EOF
   chmod 0755 /usr/local/sbin/tun2socks-post-up-full.sh
 
+  install -d -m 0755 /etc/iproute2/rt_tables.d
+  echo '200 lip' >/etc/iproute2/rt_tables.d/90-tun2socks.conf
+
   cat >/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
 #!/usr/bin/env bash
 set -e
 
-# Clean up remnants from the old policy-routing mode if they exist.
+# Clean up remnants from older full-tunnel variants if they exist.
 ip rule del priority 1000 2>/dev/null || true
 ip route flush table 100 2>/dev/null || true
 nft delete table inet tun2socks 2>/dev/null || true
+ip rule del priority 32765 from ${server_ip}/32 lookup lip 2>/dev/null || true
+ip route flush table lip 2>/dev/null || true
 
 # Keep direct reachability to the uplink, Shadowsocks server, active SSH peers,
 # and selected bypass destinations via the real gateway on ${TUN2SOCKS_IFACE}.
 ip route replace ${gw}/32 dev ${TUN2SOCKS_IFACE}
 ip route replace ${TUN_SSIP}/32 via ${gw} dev ${TUN2SOCKS_IFACE}
 ip route replace 169.254.169.0/24 dev ${TUN2SOCKS_IFACE} || true
+
+# Preserve the direct reply path for locally-terminated ingress sessions.
+# Any packet sourced from the public server IP uses the uplink routing table.
+ip route replace default via ${gw} dev ${TUN2SOCKS_IFACE} table lip
+ip rule add priority 32765 from ${server_ip}/32 lookup lip
 EOF
 
   if [[ -n "$dns_bypass" ]]; then

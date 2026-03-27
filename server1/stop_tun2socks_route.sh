@@ -13,9 +13,10 @@ require_root() {
 main() {
   require_root
 
-  local iface gw
+  local iface gw server_ip
   iface="$(ip route show default | awk '/default/ {for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
   gw="$(ip route show default | awk '/default/ {print $3; exit}')"
+  server_ip="$(ip -4 addr show dev "$iface" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
 
   log "Stopping full-tunnel routing and related services..."
   systemctl stop tun2socks-full-routing.service 2>/dev/null || true
@@ -26,6 +27,10 @@ main() {
   ip rule del priority 1000 2>/dev/null || true
   ip route flush table 100 2>/dev/null || true
   nft delete table inet tun2socks 2>/dev/null || true
+  if [[ -n "${server_ip:-}" ]]; then
+    ip rule del priority 32765 from "$server_ip"/32 lookup lip 2>/dev/null || true
+  fi
+  ip route flush table lip 2>/dev/null || true
 
   log "Restoring direct default route via uplink..."
   ip route del default dev tun0 2>/dev/null || true

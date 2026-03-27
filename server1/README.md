@@ -92,6 +92,8 @@ sudo bash ./server1/check_via_server2.sh server1/.env full
 - поднимает `tun0`
 - делает `tun0` основным default route в `main` table
 - оставляет uplink через `eth0` как fallback route с худшим metric
+- создаёт отдельную routing table `lip` для трафика, исходящего с публичного IP `server1`
+- добавляет `ip rule from <server1_public_ip> lookup lip`, чтобы ответы на входящие подключения к `server1` уходили обратно через uplink, а не в `tun0`
 - пинит напрямую через реальный gateway:
   - `server2` (`TUN_SSIP`)
   - default gateway
@@ -99,7 +101,7 @@ sudo bash ./server1/check_via_server2.sh server1/.env full
   - текущие DNS-резолверы хоста (авто-детект)
   - активные SSH peer IPs (чтобы не рвать текущие SSH-сессии)
   - дополнительные IP/подсети из `FULL_TUNNEL_BYPASS_IPS`
-- тем самым уводит через `tun0` не только локальный исходящий трафик сервера, но и трафик сервисов/клиентов, которые используют обычную маршрутизацию хоста
+- тем самым позволяет `server1` быть входной точкой для обычных клиентов/сервисов, но выпускать их egress через `server2`
 
 ---
 
@@ -118,6 +120,7 @@ sudo bash ./server1/stop_tun2socks_route.sh
 - останавливает `tun2socks-server2.service`
 - останавливает `shadowsocks-libev-local@server2-client.service`
 - удаляет legacy remnant'ы старого `fwmark/table100` режима, если они были
+- удаляет правило `from <server1_public_ip> lookup lip` и очищает table `lip`
 - убирает default route через `tun0`
 - восстанавливает обычный прямой default route через uplink `eth0`
 - возвращает обычный прямой egress через `server1`
