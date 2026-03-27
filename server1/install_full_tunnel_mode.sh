@@ -46,7 +46,7 @@ main() {
     {
       resolvectl dns "${TUN2SOCKS_IFACE}" 2>/dev/null || true
       awk '/^nameserver / {print $2}' /etc/resolv.conf 2>/dev/null || true
-    } | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u | paste -sd, -
+    } | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '^127\.' | sort -u | paste -sd, -
   )"
 
   [[ -n "$gw" ]] || { echo "ERROR: failed to detect default gateway" >&2; exit 1; }
@@ -75,9 +75,13 @@ nft add element inet tun2socks bypass4 '{ 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12
 EOF
 
   if [[ -n "$dns_bypass" ]]; then
-    cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
-nft add element inet tun2socks bypass4 '{ ${dns_bypass} }' || true
+    IFS=',' read -r -a DNS_BYPASS_ARR <<< "$dns_bypass"
+    for dns_ip in "${DNS_BYPASS_ARR[@]}"; do
+      [[ -n "$dns_ip" ]] || continue
+      cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
+nft add element inet tun2socks bypass4 '{ ${dns_ip} }' || true
 EOF
+    done
   fi
 
   if [[ -n "$FULL_TUNNEL_BYPASS_IPS" ]]; then

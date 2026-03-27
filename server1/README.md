@@ -105,6 +105,36 @@ sudo bash ./server1/check_via_server2.sh server1/.env full
 
 ---
 
+## Временно отключить / вернуть full-tunnel
+
+После того как `full` уже был один раз настроен через `setup.sh`, можно быстро переключать режим отдельными скриптами.
+
+### Отключить перенаправление трафика через server2
+
+```bash
+sudo bash ./server1/stop_tun2socks_route.sh
+```
+
+Что делает:
+- останавливает `tun2socks-full-routing.service`
+- останавливает `tun2socks-server2.service`
+- останавливает `shadowsocks-libev-local@server2-client.service`
+- удаляет `ip rule` / route table `100`
+- удаляет `nft` table `inet tun2socks`
+- возвращает обычный прямой egress через `server1`
+
+### Снова поднять full-tunnel
+
+```bash
+sudo bash ./server1/restart_tun2socks_route.sh
+```
+
+Что делает:
+- поднимает `shadowsocks-libev-local@server2-client.service`
+- поднимает `tun2socks-server2.service`
+- заново применяет `tun2socks-full-routing.service`
+- возвращает egress через `server2`
+
 ## Диагностика
 
 ```bash
