@@ -14,8 +14,10 @@ require_root() {
 
 load_env() {
   [[ -f "$ENV_FILE" ]] || { echo "ERROR: env file not found: $ENV_FILE" >&2; exit 1; }
-  # shellcheck disable=SC2046
-  export $(grep -v '^#' "$ENV_FILE" | xargs -d '\n' || true)
+  # shellcheck disable=SC1090
+  set -a
+  . "$ENV_FILE"
+  set +a
 
   : "${LOCAL_SOCKS_ADDR:=127.0.0.1}"
   : "${LOCAL_SOCKS_PORT:=1080}"

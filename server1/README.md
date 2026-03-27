@@ -99,6 +99,7 @@ sudo bash ./server1/check_via_server2.sh server1/.env full
   - localhost
   - metadata range `169.254.169.0/24`
   - локальные RFC1918 подсети
+  - текущие DNS-резолверы хоста (авто-детект)
   - ответы SSH (`tcp sport 22`)
   - дополнительные IP из `FULL_TUNNEL_BYPASS_IPS`
 

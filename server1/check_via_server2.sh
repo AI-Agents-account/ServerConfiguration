@@ -9,8 +9,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# shellcheck disable=SC2046
-export $(grep -v '^#' "$ENV_FILE" | xargs -d '\n' || true)
+# shellcheck disable=SC1090
+set -a
+. "$ENV_FILE"
+set +a
 
 : "${TUN_SSIP:?TUN_SSIP is required}"
 : "${TUN_SSPORT:=6666}"
