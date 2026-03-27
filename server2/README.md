@@ -15,8 +15,7 @@ sudo bash ./start.sh
 ## 1. Подготовка `.env`
 
 ```bash
-cp server2/.env.example server2/.env
-nano server2/.env
+cp server2/.env.example server2/.env && nano server2/.env
 ```
 
 Минимально нужны:
