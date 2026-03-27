@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-log() { echo "[socks_second_server.sh] $*"; }
+log() { echo "[server2/setup.sh] $*"; }
 
 require_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then

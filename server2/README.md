@@ -2,7 +2,17 @@
 
 `server2` — это публичная сторона, принимающая трафик от `server1`.
 
-## Подготовка `.env`
+## 0. Инициализация сервера
+
+Перед настройкой server2 обязательно выполните:
+
+```bash
+sudo bash ./start.sh
+```
+
+---
+
+## 1. Подготовка `.env`
 
 ```bash
 cp server2/.env.example server2/.env
@@ -21,10 +31,10 @@ SS_TIMEOUT=86400
 
 ---
 
-## Установка
+## 2. Установка
 
 ```bash
-sudo bash ./socks_second_server.sh server2/.env
+sudo bash ./server2/setup.sh server2/.env
 ```
 
 Скрипт:
