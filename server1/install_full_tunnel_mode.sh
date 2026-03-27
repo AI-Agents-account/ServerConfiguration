@@ -42,9 +42,19 @@ main() {
   local gw server_ip dns_bypass ssh_bypass
   gw="$(ip route show default | awk '/default/ {print $3; exit}')"
   server_ip="$(ip -4 addr show dev "${TUN2SOCKS_IFACE}" | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
+  # Collect *real* upstream DNS servers (not the local stub 127.0.0.53).
+  # We deliberately bypass these via the uplink gateway because UDP DNS may be unreliable
+  # through the tun2socks+Shadowsocks path on some providers.
   dns_bypass="$(
     {
+      # Interface-specific DNS (if present)
       resolvectl dns "${TUN2SOCKS_IFACE}" 2>/dev/null || true
+      # Global DNS (often where systemd-resolved stores upstream servers)
+      resolvectl dns 2>/dev/null || true
+      resolvectl status 2>/dev/null || true
+      # systemd-resolved generated resolv.conf with real upstream servers
+      awk '/^nameserver / {print $2}' /run/systemd/resolve/resolv.conf 2>/dev/null || true
+      # /etc/resolv.conf may be a stub; still parse it, but we will filter 127.*
       awk '/^nameserver / {print $2}' /etc/resolv.conf 2>/dev/null || true
     } | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '^127\.' | sort -u | paste -sd, -
   )"
