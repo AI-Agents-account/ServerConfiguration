@@ -14,8 +14,10 @@ require_root() {
 
 load_env() {
   [[ -f "$ENV_FILE" ]] || { echo "ERROR: env file not found: $ENV_FILE" >&2; exit 1; }
-  # shellcheck disable=SC2046
-  export $(grep -v '^#' "$ENV_FILE" | xargs -d '\n' || true)
+  # shellcheck disable=SC1090
+  set -a
+  . "$ENV_FILE"
+  set +a
 
   : "${TUN_SSIP:?TUN_SSIP is required}"
   : "${LOCAL_SOCKS_ADDR:=127.0.0.1}"
@@ -37,9 +39,15 @@ main() {
   apt-get update -y
   DEBIAN_FRONTEND=noninteractive apt-get install -y nftables
 
-  local gw server_ip bypass_entries
+  local gw server_ip dns_bypass
   gw="$(ip route show default | awk '/default/ {print $3; exit}')"
   server_ip="$(ip -4 addr show dev "${TUN2SOCKS_IFACE}" | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
+  dns_bypass="$(
+    {
+      resolvectl dns "${TUN2SOCKS_IFACE}" 2>/dev/null || true
+      awk '/^nameserver / {print $2}' /etc/resolv.conf 2>/dev/null || true
+    } | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u | paste -sd, -
+  )"
 
   [[ -n "$gw" ]] || { echo "ERROR: failed to detect default gateway" >&2; exit 1; }
   [[ -n "$server_ip" ]] || { echo "ERROR: failed to detect server1 IPv4 on ${TUN2SOCKS_IFACE}" >&2; exit 1; }
@@ -65,6 +73,12 @@ nft flush table inet tun2socks
 nft add set inet tun2socks bypass4 '{ type ipv4_addr; flags interval; }'
 nft add element inet tun2socks bypass4 '{ 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.0/24, ${TUN_SSIP}/32, ${gw}/32, ${server_ip}/32 }'
 EOF
+
+  if [[ -n "$dns_bypass" ]]; then
+    cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF
+nft add element inet tun2socks bypass4 '{ ${dns_bypass} }' || true
+EOF
+  fi
 
   if [[ -n "$FULL_TUNNEL_BYPASS_IPS" ]]; then
     cat >>/usr/local/sbin/tun2socks-apply-full-routing.sh <<EOF

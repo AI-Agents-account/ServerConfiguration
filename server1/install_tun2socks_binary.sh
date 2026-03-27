@@ -21,7 +21,7 @@ main() {
     unzip \
     shadowsocks-libev
 
-  local arch tun_arch url tmpd bin
+  local arch tun_arch url bin
   arch="$(dpkg --print-architecture)"
 
   case "$arch" in
