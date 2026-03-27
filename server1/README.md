@@ -90,18 +90,16 @@ sudo bash ./server1/check_via_server2.sh server1/.env full
 
 ### Что делает full-tunnel mode
 - поднимает `tun0`
-- создаёт policy routing table `100`
-- через `nftables` маркирует почти весь исходящий трафик
-- уводит marked traffic через `tun0`
-- исключает:
+- делает `tun0` основным default route в `main` table
+- оставляет uplink через `eth0` как fallback route с худшим metric
+- пинит напрямую через реальный gateway:
   - `server2` (`TUN_SSIP`)
   - default gateway
-  - localhost
   - metadata range `169.254.169.0/24`
-  - локальные RFC1918 подсети
   - текущие DNS-резолверы хоста (авто-детект)
-  - ответы SSH (`tcp sport 22`)
-  - дополнительные IP из `FULL_TUNNEL_BYPASS_IPS`
+  - активные SSH peer IPs (чтобы не рвать текущие SSH-сессии)
+  - дополнительные IP/подсети из `FULL_TUNNEL_BYPASS_IPS`
+- тем самым уводит через `tun0` не только локальный исходящий трафик сервера, но и трафик сервисов/клиентов, которые используют обычную маршрутизацию хоста
 
 ---
 
@@ -119,8 +117,9 @@ sudo bash ./server1/stop_tun2socks_route.sh
 - останавливает `tun2socks-full-routing.service`
 - останавливает `tun2socks-server2.service`
 - останавливает `shadowsocks-libev-local@server2-client.service`
-- удаляет `ip rule` / route table `100`
-- удаляет `nft` table `inet tun2socks`
+- удаляет legacy remnant'ы старого `fwmark/table100` режима, если они были
+- убирает default route через `tun0`
+- восстанавливает обычный прямой default route через uplink `eth0`
 - возвращает обычный прямой egress через `server1`
 
 ### Снова поднять full-tunnel
@@ -141,7 +140,7 @@ sudo bash ./server1/restart_tun2socks_route.sh
 systemctl status shadowsocks-libev-local@server2-client.service --no-pager
 systemctl status tun2socks-server2.service --no-pager
 ip -br addr show tun0
+ip route
 ip rule show
-ip route show table 100
 journalctl -u tun2socks-server2.service -n 50 --no-pager
 ```
