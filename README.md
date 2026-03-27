@@ -16,12 +16,23 @@
 
 ## Рекомендуемый порядок
 
+## 0. Инициализация любого сервера
+
+Перед настройкой **server1** или **server2** сначала выполните базовую инициализацию окружения:
+
+```bash
+sudo bash ./start.sh
+```
+
+Скрипт подготовит базовое окружение сервера (пакеты, Docker, Compose plugin, WireGuard installer и служебные зависимости).
+
 ### 1. Настроить server2
 
 ```bash
+sudo bash ./start.sh
 cp server2/.env.example server2/.env
 nano server2/.env
-sudo bash ./socks_second_server.sh server2/.env
+sudo bash ./server2/setup.sh server2/.env
 ```
 
 Проверить:
@@ -34,6 +45,7 @@ sudo nft list set inet filter ALLOWED_SPROXY
 ### 2. Настроить server1 в safe mode
 
 ```bash
+sudo bash ./start.sh
 cp server1/.env.example server1/.env
 nano server1/.env
 sudo bash ./server1/setup.sh safe server1/.env
@@ -51,6 +63,7 @@ sudo via-server2 curl -4 https://ifconfig.me
 > Внимание: full-tunnel может повлиять на SSH и другой исходящий трафик. Делать только при наличии аварийного доступа через консоль провайдера.
 
 ```bash
+sudo bash ./start.sh
 sudo bash ./server1/setup.sh full server1/.env
 sudo bash ./server1/check_via_server2.sh server1/.env full
 ```
