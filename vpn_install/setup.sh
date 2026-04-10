@@ -18,8 +18,8 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2;
 : "${PORT_VLESS_REALITY_TCP:=443}"
 : "${PORT_TROJAN_TLS_TCP:=2053}"
 : "${PORT_HYSTERIA2_QUIC_UDP:=443}"
-: "${REALITY_SERVER_NAME:=www.cloudflare.com}"
-: "${REALITY_HANDSHAKE_SERVER:=www.cloudflare.com}"
+: "${REALITY_SERVER_NAME:=www.yandex.ru}"
+: "${REALITY_HANDSHAKE_SERVER:=www.yandex.ru}"
 : "${REALITY_HANDSHAKE_PORT:=443}"
 : "${SINGBOX_USER:=singbox}"
 
