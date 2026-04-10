@@ -227,6 +227,245 @@ systemctl daemon-reload
 systemctl enable sing-box
 systemctl restart sing-box
 
+# Generate client configs on the server
+CLIENT_DIR="/etc/sing-box/client-configs"
+install -d -m 0755 "${CLIENT_DIR}" "${CLIENT_DIR}/iphone" "${CLIENT_DIR}/windows" "${CLIENT_DIR}/android" "${CLIENT_DIR}/macos"
+
+TLS_INSECURE=true
+if [[ "${FULLCHAIN}" == /etc/letsencrypt/* ]]; then
+  TLS_INSECURE=false
+fi
+
+# iPhone (legacy DNS format, as some Apple builds reject new DNS server fields)
+cat >"${CLIENT_DIR}/iphone/vless_reality_443.json" <<EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {"type": "tun", "tag": "tun-in", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": true, "stack": "system", "sniff": true}
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
+      "server_port": ${PORT_VLESS_REALITY_TCP},
+      "uuid": "${VLESS_UUID}",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "${REALITY_SERVER_NAME}",
+        "alpn": ["h2", "http/1.1"],
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "reality": {"enabled": true, "public_key": "${REALITY_PUBLIC_KEY}", "short_id": "${REALITY_SHORT_ID}"}
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}],
+    "final": "proxy"
+  }
+}
+EOF
+
+cat >"${CLIENT_DIR}/iphone/trojan_2053.json" <<EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {"type": "tun", "tag": "tun-in", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": true, "stack": "system", "sniff": true}
+  ],
+  "outbounds": [
+    {
+      "type": "trojan",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
+      "server_port": ${PORT_TROJAN_TLS_TCP},
+      "password": "${TROJAN_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": ["h2", "http/1.1"],
+        "insecure": ${TLS_INSECURE}
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}],
+    "final": "proxy"
+  }
+}
+EOF
+
+cat >"${CLIENT_DIR}/iphone/hysteria2_443udp.json" <<EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {"type": "tun", "tag": "tun-in", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": true, "stack": "system", "sniff": true}
+  ],
+  "outbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
+      "server_port": ${PORT_HYSTERIA2_QUIC_UDP},
+      "password": "${HYSTERIA2_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": ["h3"],
+        "insecure": ${TLS_INSECURE}
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}],
+    "final": "proxy"
+  }
+}
+EOF
+
+# Modern clients (Windows/Android/macOS): new DNS server format
+for platform in windows android macos; do
+  cat >"${CLIENT_DIR}/${platform}/vless_reality_443.json" <<EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {"type": "tun", "tag": "tun-in", "interface_name": "singbox0", "address": ["172.19.0.1/30"], "mtu": 1500, "auto_route": true, "strict_route": true, "stack": "system"}
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
+      "server_port": ${PORT_VLESS_REALITY_TCP},
+      "uuid": "${VLESS_UUID}",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "${REALITY_SERVER_NAME}",
+        "alpn": ["h2", "http/1.1"],
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "reality": {"enabled": true, "public_key": "${REALITY_PUBLIC_KEY}", "short_id": "${REALITY_SHORT_ID}"}
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "yandex1",
+    "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}],
+    "final": "proxy"
+  }
+}
+EOF
+
+  cat >"${CLIENT_DIR}/${platform}/trojan_2053.json" <<EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {"type": "tun", "tag": "tun-in", "interface_name": "singbox0", "address": ["172.19.0.1/30"], "mtu": 1500, "auto_route": true, "strict_route": true, "stack": "system"}
+  ],
+  "outbounds": [
+    {
+      "type": "trojan",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
+      "server_port": ${PORT_TROJAN_TLS_TCP},
+      "password": "${TROJAN_PASSWORD}",
+      "tls": {"enabled": true, "server_name": "${DOMAIN}", "alpn": ["h2", "http/1.1"], "insecure": ${TLS_INSECURE}}
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "yandex1",
+    "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}],
+    "final": "proxy"
+  }
+}
+EOF
+
+  cat >"${CLIENT_DIR}/${platform}/hysteria2_443udp.json" <<EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {"type": "tun", "tag": "tun-in", "interface_name": "singbox0", "address": ["172.19.0.1/30"], "mtu": 1500, "auto_route": true, "strict_route": true, "stack": "system"}
+  ],
+  "outbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
+      "server_port": ${PORT_HYSTERIA2_QUIC_UDP},
+      "password": "${HYSTERIA2_PASSWORD}",
+      "tls": {"enabled": true, "server_name": "${DOMAIN}", "alpn": ["h3"], "insecure": ${TLS_INSECURE}}
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "yandex1",
+    "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}],
+    "final": "proxy"
+  }
+}
+EOF
+
+done
+
 echo "---"
 echo "Server configured. Save these client parameters:"
 echo "DOMAIN=${DOMAIN}"
