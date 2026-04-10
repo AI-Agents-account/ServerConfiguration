@@ -19,9 +19,30 @@
 1) Скопировать пример окружения:
 
 ```bash
-cp ServerConfiguration/vpn_install/.env.example ServerConfiguration/vpn_install/.env
-nano ServerConfiguration/vpn_install/.env
+cp vpn_install/.env.example vpn_install/.env
+nano vpn_install/.env
 ```
+
+### Какие переменные заполнять в `.env`
+
+Минимум:
+- `DOMAIN` — домен, который указывает на этот VPS (A/AAAA на публичный IP)
+- `EMAIL` — email для Let’s Encrypt (используется если `ENABLE_LETSENCRYPT=1`)
+
+Режим сертификата:
+- `ENABLE_LETSENCRYPT=1` — получить валидный сертификат (рекомендуется для Trojan/Hysteria2)
+- `ALLOW_SELF_SIGNED=1` — fallback на self-signed, если Let’s Encrypt не смог выпуститься (например, закрыт inbound 80)
+
+Порты (если хотите изменить):
+- `PORT_VLESS_REALITY_TCP` — VLESS+Reality (обычно 443/TCP)
+- `PORT_TROJAN_TLS_TCP` — Trojan+TLS (обычно 2053/TCP)
+- `PORT_HYSTERIA2_QUIC_UDP` — Hysteria2 (обычно 443/UDP)
+
+Reality подстановка (маскировка под популярный HTTPS домен):
+- `REALITY_SERVER_NAME` и `REALITY_HANDSHAKE_SERVER` — должны быть **одинаковыми** и указывать на реальный домен, который доступен из вашей сети. По умолчанию: `www.yandex.ru`.
+
+Пользователи/секреты:
+- `VLESS_UUID`, `TROJAN_PASSWORD`, `HYSTERIA2_PASSWORD` можно оставить пустыми — скрипт сгенерирует и выведет значения.
 
 2) Запуск установки:
 
