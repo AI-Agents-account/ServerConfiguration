@@ -54,5 +54,28 @@ ls -la /etc/letsencrypt/live/$DOMAIN/
 
 - iOS/macOS: sing-box for Apple platforms: https://sing-box.sagernet.org/clients/apple/
 - Android: sing-box for Android: https://sing-box.sagernet.org/clients/
+- Windows: используйте sing-box CLI (как в папке `clients/`).
 
-Для Windows официальный GUI у sing-box сейчас заявлен как WIP в документации, поэтому потребуется сторонний GUI-клиент.
+## Зачем на сервере 3 порта/способа
+
+В странах с активной блокировкой/DPI один протокол/порт может периодически деградировать или блокироваться. Поэтому на сервере поднимаются **несколько независимых профилей**:
+
+1) **VLESS + Reality (XTLS Vision)** — основной профиль, максимальная устойчивость к DPI
+   - Порт: `PORT_VLESS_REALITY_TCP` (по умолчанию 443/TCP)
+
+2) **Trojan + TLS** — резервный профиль (TLS-похожий)
+   - Порт: `PORT_TROJAN_TLS_TCP` (по умолчанию 2053/TCP)
+
+3) **Hysteria2 + TLS (QUIC/UDP)** — резервный профиль на UDP (часто «выживает» при проблемах с TCP)
+   - Порт: `PORT_HYSTERIA2_QUIC_UDP` (по умолчанию 443/UDP)
+
+Где это задаётся:
+- на сервере — в `/etc/sing-box/config.json`, который генерирует `vpn_install/setup.sh`
+- у клиентов — **в конфиге клиента** (вы выбираете нужный профиль/тип и соответствующий порт). В папке `vpn_install/clients/` лежат готовые шаблоны под VLESS+Reality.
+
+## Готовые клиентские конфиги
+
+В папке `vpn_install/clients/` лежат шаблоны (замените плейсхолдеры `${VLESS_UUID}`, `${REALITY_PUBLIC_KEY}`, `${REALITY_SHORT_ID}` на ваши значения):
+
+- `windows11_full_tunnel_vless_reality.json` — полный туннель (TUN) для Windows 11
+- `iphone_vless_reality.json` — конфиг для iPhone sing-box
