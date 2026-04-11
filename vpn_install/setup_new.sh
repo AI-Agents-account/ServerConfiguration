@@ -37,9 +37,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y ca-certificates curl unzip jq ufw fail2ban unattended-upgrades nginx
 
-# Enable unattended upgrades (non-interactive best effort)
+# Enable unattended upgrades (non-interactive). Avoid dpkg-reconfigure (can block on some hosts).
 if dpkg -s unattended-upgrades >/dev/null 2>&1; then
-  dpkg-reconfigure --priority=low unattended-upgrades || true
+  systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 fi
 
 # Basic firewall (Only expose 443 TCP/UDP, 80 TCP for Let's Encrypt, 22 SSH)
