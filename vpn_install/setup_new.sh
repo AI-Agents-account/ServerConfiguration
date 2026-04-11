@@ -185,7 +185,9 @@ systemctl enable nginx || true
 cd /opt/trusttunnel
 cp "${FULLCHAIN}" /opt/trusttunnel/cert.pem
 cp "${PRIVKEY}" /opt/trusttunnel/key.pem
-./setup_wizard -m non-interactive \
+# TrustTunnel wizard can hang on some hosts even in non-interactive mode.
+# Run with a timeout and fall back to self-signed if the provided-cert path fails.
+if ! timeout 180s ./setup_wizard -m non-interactive \
     -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
     -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
     -n "${TRUSTTUNNEL_DOMAIN}" \
@@ -193,7 +195,16 @@ cp "${PRIVKEY}" /opt/trusttunnel/key.pem
     --hosts-settings hosts.toml \
     --cert-type provided \
     --cert-chain-path /opt/trusttunnel/cert.pem \
-    --cert-key-path /opt/trusttunnel/key.pem
+    --cert-key-path /opt/trusttunnel/key.pem; then
+  echo "[TrustTunnel] setup_wizard failed or timed out with provided cert; retrying with self-signed..." >&2
+  timeout 180s ./setup_wizard -m non-interactive \
+      -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
+      -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
+      -n "${TRUSTTUNNEL_DOMAIN}" \
+      --lib-settings vpn.toml \
+      --hosts-settings hosts.toml \
+      --cert-type self-signed
+fi
 
 cp trusttunnel.service.template /etc/systemd/system/trusttunnel.service
 sed -i 's|ExecStart=.*|ExecStart=/opt/trusttunnel/trusttunnel_endpoint /opt/trusttunnel/vpn.toml /opt/trusttunnel/hosts.toml|' /etc/systemd/system/trusttunnel.service
