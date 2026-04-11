@@ -101,7 +101,7 @@ TrustTunnel Deeplink:
 ${TT_DEEPLINK}
 LINKS_EOF
 
-cat > "${CLIENT_DIR}/singbox_client.json" <<JSON_EOF
+cat > "${CLIENT_DIR}/singbox_vless.json" <<VLESS_EOF
 {
   "log": {"level": "info"},
   "outbounds": [
@@ -125,12 +125,54 @@ cat > "${CLIENT_DIR}/singbox_client.json" <<JSON_EOF
     }
   ]
 }
-JSON_EOF
+VLESS_EOF
+
+cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
+{
+  "log": {"level": "info"},
+  "outbounds": [
+    {
+      "type": "trojan",
+      "tag": "trojan-tls",
+      "server": "${SERVER_IP}",
+      "server_port": ${PORT_TROJAN_TLS_TCP},
+      "password": "${NEW_TROJAN_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "utls": {"enabled": true, "fingerprint": "chrome"}
+      }
+    }
+  ]
+}
+TROJAN_EOF
+
+cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
+{
+  "log": {"level": "info"},
+  "outbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2",
+      "server": "${SERVER_IP}",
+      "server_port": ${PORT_HYSTERIA2_QUIC_UDP},
+      "password": "${NEW_HYSTERIA2_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": ["h3"]
+      }
+    }
+  ]
+}
+HY2_EOF
 
 echo "========================================================="
 echo "✅ User '${USERNAME}' has been added successfully."
 echo "Client configurations have been saved to: ${CLIENT_DIR}/"
-echo "  1. trusttunnel_client.toml  (For TrustTunnel CLI / App)"
-echo "  2. singbox_client.json      (For sing-box clients)"
-echo "  3. links.txt                (vless://, trojan:// URIs & TT link)"
+echo "  1. trusttunnel_client.toml    (For TrustTunnel CLI / App)"
+echo "  2. singbox_vless.json         (sing-box VLESS config)"
+echo "  3. singbox_trojan.json        (sing-box Trojan config)"
+echo "  4. singbox_hysteria2.json     (sing-box Hysteria2 config)"
+echo "  5. links.txt                  (vless://, trojan:// URIs & TT link)"
 echo "========================================================="
