@@ -162,6 +162,17 @@ if [[ ( ! -f "${FULLCHAIN}" || ! -f "${PRIVKEY}" ) ]]; then
   fi
 fi
 
+# Ensure sing-box can read the TLS key (service runs as ${SINGBOX_USER}).
+# Let's Encrypt keys are typically root-only; copy them to /etc/sing-box/certs with group access.
+install -d -m 0755 /etc/sing-box/certs
+cp -f "${FULLCHAIN}" "/etc/sing-box/certs/${DOMAIN}.fullchain.pem"
+cp -f "${PRIVKEY}" "/etc/sing-box/certs/${DOMAIN}.privkey.pem"
+chown root:${SINGBOX_USER} "/etc/sing-box/certs/${DOMAIN}.privkey.pem" || true
+chmod 640 "/etc/sing-box/certs/${DOMAIN}.privkey.pem" || true
+chmod 644 "/etc/sing-box/certs/${DOMAIN}.fullchain.pem" || true
+FULLCHAIN="/etc/sing-box/certs/${DOMAIN}.fullchain.pem"
+PRIVKEY="/etc/sing-box/certs/${DOMAIN}.privkey.pem"
+
 # Nginx Fallback setup
 cat >/etc/nginx/sites-available/fallback <<EOF
 server {
