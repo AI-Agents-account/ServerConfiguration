@@ -63,6 +63,7 @@ if [[ -f "$SETTINGS_FILE" ]]; then
 else
   echo "Warning: $SETTINGS_FILE not found. Client files generation might be incomplete."
   SERVER_IP=$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")
+  PORT_PUBLIC=443
   PORT_VLESS_REALITY_TCP=8443
   PORT_TROJAN_TLS_TCP=2053
   PORT_HYSTERIA2_QUIC_UDP=8443
@@ -79,13 +80,13 @@ mkdir -p "${CLIENT_DIR}"
 TT_DEEPLINK=""
 if [[ -d "/opt/trusttunnel" ]]; then
   cd /opt/trusttunnel
-  TT_DEEPLINK=$(./trusttunnel_endpoint vpn.toml hosts.toml -c "${USERNAME}" -a "${SERVER_IP}:${PORT_TRUSTTUNNEL}" --format deeplink || echo "Failed to generate deeplink")
-  ./trusttunnel_endpoint vpn.toml hosts.toml -c "${USERNAME}" -a "${SERVER_IP}:${PORT_TRUSTTUNNEL}" --format toml > "${CLIENT_DIR}/trusttunnel_client.toml" || echo "Failed to generate toml"
+  TT_DEEPLINK=$(./trusttunnel_endpoint vpn.toml hosts.toml -c "${USERNAME}" -a "${SERVER_IP}:${PORT_PUBLIC}" --format deeplink || echo "Failed to generate deeplink")
+  ./trusttunnel_endpoint vpn.toml hosts.toml -c "${USERNAME}" -a "${SERVER_IP}:${PORT_PUBLIC}" --format toml > "${CLIENT_DIR}/trusttunnel_client.toml" || echo "Failed to generate toml"
 fi
 
-VLESS_LINK="vless://${NEW_VLESS_UUID}@${SERVER_IP}:${PORT_VLESS_REALITY_TCP}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${USERNAME}-VLESS"
-TROJAN_LINK="trojan://${NEW_TROJAN_PASSWORD}@${SERVER_IP}:${PORT_TROJAN_TLS_TCP}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${USERNAME}-Trojan"
-HY2_LINK="hy2://${NEW_HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_HYSTERIA2_QUIC_UDP}?sni=${DOMAIN}#${USERNAME}-Hysteria2"
+VLESS_LINK="vless://${NEW_VLESS_UUID}@${SERVER_IP}:${PORT_PUBLIC}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${USERNAME}-VLESS"
+TROJAN_LINK="trojan://${NEW_TROJAN_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${USERNAME}-Trojan"
+HY2_LINK="hy2://${NEW_HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?sni=${DOMAIN}#${USERNAME}-Hysteria2"
 
 cat > "${CLIENT_DIR}/links.txt" <<LINKS_EOF
 VLESS+Reality:
@@ -104,12 +105,15 @@ LINKS_EOF
 cat > "${CLIENT_DIR}/singbox_vless.json" <<VLESS_EOF
 {
   "log": {"level": "info"},
+  "inbounds": [
+    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+  ],
   "outbounds": [
     {
       "type": "vless",
-      "tag": "vless-reality",
+      "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_VLESS_REALITY_TCP},
+      "server_port": ${PORT_PUBLIC},
       "uuid": "${NEW_VLESS_UUID}",
       "flow": "xtls-rprx-vision",
       "tls": {
@@ -123,19 +127,23 @@ cat > "${CLIENT_DIR}/singbox_vless.json" <<VLESS_EOF
         }
       }
     }
-  ]
+  ],
+  "route": {"final": "out"}
 }
 VLESS_EOF
 
 cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
 {
   "log": {"level": "info"},
+  "inbounds": [
+    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+  ],
   "outbounds": [
     {
       "type": "trojan",
-      "tag": "trojan-tls",
+      "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_TROJAN_TLS_TCP},
+      "server_port": ${PORT_PUBLIC},
       "password": "${NEW_TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
@@ -143,19 +151,23 @@ cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
         "utls": {"enabled": true, "fingerprint": "chrome"}
       }
     }
-  ]
+  ],
+  "route": {"final": "out"}
 }
 TROJAN_EOF
 
 cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
 {
   "log": {"level": "info"},
+  "inbounds": [
+    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+  ],
   "outbounds": [
     {
       "type": "hysteria2",
-      "tag": "hysteria2",
+      "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_HYSTERIA2_QUIC_UDP},
+      "server_port": ${PORT_PUBLIC},
       "password": "${NEW_HYSTERIA2_PASSWORD}",
       "tls": {
         "enabled": true,
@@ -163,7 +175,8 @@ cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
         "alpn": ["h3"]
       }
     }
-  ]
+  ],
+  "route": {"final": "out"}
 }
 HY2_EOF
 

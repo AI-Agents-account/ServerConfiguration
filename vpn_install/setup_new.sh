@@ -15,6 +15,9 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2;
 # Defaults
 : "${ENABLE_LETSENCRYPT:=1}"
 : "${ALLOW_SELF_SIGNED:=1}"
+: "${PORT_PUBLIC:=443}" # public entrypoint for ALL protocols (TCP/UDP)
+
+# Internal ports (loopback only). Public traffic is multiplexed on PORT_PUBLIC.
 : "${PORT_VLESS_REALITY_TCP:=8443}"
 : "${PORT_TROJAN_TLS_TCP:=2053}"
 : "${PORT_HYSTERIA2_QUIC_UDP:=8443}"
@@ -45,8 +48,8 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
 ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 443/udp
+ufw allow "${PORT_PUBLIC}"/tcp
+ufw allow "${PORT_PUBLIC}"/udp
 ufw --force enable
 
 # fail2ban (sshd)
@@ -208,14 +211,14 @@ cat >/etc/sing-box/config.json <<EOF
       "type": "direct",
       "tag": "tcp-mux",
       "listen": "::",
-      "listen_port": 443,
+      "listen_port": ${PORT_PUBLIC},
       "network": "tcp"
     },
     {
       "type": "direct",
       "tag": "udp-mux",
       "listen": "::",
-      "listen_port": 443,
+      "listen_port": ${PORT_PUBLIC},
       "network": "udp"
     },
     {
@@ -352,6 +355,7 @@ systemctl restart sing-box || true
 SERVER_IP=$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")
 cat >/etc/vpn_settings.env <<ENV_EOF
 SERVER_IP="${SERVER_IP}"
+PORT_PUBLIC="${PORT_PUBLIC}"
 DOMAIN="${DOMAIN}"
 TRUSTTUNNEL_DOMAIN="${TRUSTTUNNEL_DOMAIN}"
 REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY}"
@@ -368,12 +372,13 @@ CLIENT_DIR="/root/vpn_clients/${TRUSTTUNNEL_USERNAME}"
 mkdir -p "${CLIENT_DIR}"
 
 cd /opt/trusttunnel
-TT_DEEPLINK=$(./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_TRUSTTUNNEL}" --format deeplink)
-./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_TRUSTTUNNEL}" --format toml > "${CLIENT_DIR}/trusttunnel_client.toml"
+TT_DEEPLINK=$(./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_PUBLIC}" --format deeplink)
+./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_PUBLIC}" --format toml > "${CLIENT_DIR}/trusttunnel_client.toml"
 
-VLESS_LINK="vless://${VLESS_UUID}@${SERVER_IP}:${PORT_VLESS_REALITY_TCP}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${TRUSTTUNNEL_USERNAME}-VLESS"
-TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_TROJAN_TLS_TCP}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
-HY2_LINK="hy2://${HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_HYSTERIA2_QUIC_UDP}?sni=${DOMAIN}#${TRUSTTUNNEL_USERNAME}-Hysteria2"
+VLESS_LINK="vless://${VLESS_UUID}@${SERVER_IP}:${PORT_PUBLIC}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${TRUSTTUNNEL_USERNAME}-VLESS"
+TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
+HY2_LINK="hy2://${HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?sni=${DOMAIN}#${TRUSTTUNNEL_USERNAME}-Hysteria2"
+
 
 cat > "${CLIENT_DIR}/links.txt" <<LINKS_EOF
 VLESS+Reality:
@@ -392,12 +397,15 @@ LINKS_EOF
 cat > "${CLIENT_DIR}/singbox_vless.json" <<VLESS_EOF
 {
   "log": {"level": "info"},
+  "inbounds": [
+    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+  ],
   "outbounds": [
     {
       "type": "vless",
-      "tag": "vless-reality",
+      "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_VLESS_REALITY_TCP},
+      "server_port": ${PORT_PUBLIC},
       "uuid": "${VLESS_UUID}",
       "flow": "xtls-rprx-vision",
       "tls": {
@@ -411,19 +419,23 @@ cat > "${CLIENT_DIR}/singbox_vless.json" <<VLESS_EOF
         }
       }
     }
-  ]
+  ],
+  "route": {"final": "out"}
 }
 VLESS_EOF
 
 cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
 {
   "log": {"level": "info"},
+  "inbounds": [
+    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+  ],
   "outbounds": [
     {
       "type": "trojan",
-      "tag": "trojan-tls",
+      "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_TROJAN_TLS_TCP},
+      "server_port": ${PORT_PUBLIC},
       "password": "${TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
@@ -431,19 +443,23 @@ cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
         "utls": {"enabled": true, "fingerprint": "chrome"}
       }
     }
-  ]
+  ],
+  "route": {"final": "out"}
 }
 TROJAN_EOF
 
 cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
 {
   "log": {"level": "info"},
+  "inbounds": [
+    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+  ],
   "outbounds": [
     {
       "type": "hysteria2",
-      "tag": "hysteria2",
+      "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_HYSTERIA2_QUIC_UDP},
+      "server_port": ${PORT_PUBLIC},
       "password": "${HYSTERIA2_PASSWORD}",
       "tls": {
         "enabled": true,
@@ -451,7 +467,8 @@ cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
         "alpn": ["h3"]
       }
     }
-  ]
+  ],
+  "route": {"final": "out"}
 }
 HY2_EOF
 
