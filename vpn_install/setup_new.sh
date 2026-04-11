@@ -348,18 +348,77 @@ systemctl daemon-reload || true
 systemctl enable sing-box || true
 systemctl restart sing-box || true
 
-echo "---"
-echo "Server configured."
-echo "DOMAIN=${DOMAIN}"
-echo "TRUSTTUNNEL_DOMAIN=${TRUSTTUNNEL_DOMAIN}"
-echo "TRUSTTUNNEL_USERNAME=${TRUSTTUNNEL_USERNAME}"
-echo "TRUSTTUNNEL_PASSWORD=${TRUSTTUNNEL_PASSWORD}"
-echo "VLESS_UUID=${VLESS_UUID}"
-echo "REALITY_PUBLIC_KEY=${REALITY_PUBLIC_KEY}"
-echo "REALITY_SHORT_ID=${REALITY_SHORT_ID}"
-echo "REALITY_SERVER_NAME=${REALITY_SERVER_NAME}"
-echo "TROJAN_PASSWORD=${TROJAN_PASSWORD}"
-echo "HYSTERIA2_PASSWORD=${HYSTERIA2_PASSWORD}"
-echo "---"
-echo "To get TrustTunnel Client Config (deeplink), run:"
-echo "cd /opt/trusttunnel && ./trusttunnel_endpoint vpn.toml hosts.toml -c ${TRUSTTUNNEL_USERNAME} -a <your-server-ip>"
+# Save settings for add_user_new.sh
+SERVER_IP=$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")
+cat >/etc/vpn_settings.env <<ENV_EOF
+SERVER_IP="${SERVER_IP}"
+DOMAIN="${DOMAIN}"
+TRUSTTUNNEL_DOMAIN="${TRUSTTUNNEL_DOMAIN}"
+REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY}"
+REALITY_SHORT_ID="${REALITY_SHORT_ID}"
+REALITY_SERVER_NAME="${REALITY_SERVER_NAME}"
+PORT_VLESS_REALITY_TCP="${PORT_VLESS_REALITY_TCP}"
+PORT_TROJAN_TLS_TCP="${PORT_TROJAN_TLS_TCP}"
+PORT_HYSTERIA2_QUIC_UDP="${PORT_HYSTERIA2_QUIC_UDP}"
+PORT_TRUSTTUNNEL="${PORT_TRUSTTUNNEL}"
+ENV_EOF
+
+# Generate Client Configs
+CLIENT_DIR="/root/vpn_clients/${TRUSTTUNNEL_USERNAME}"
+mkdir -p "${CLIENT_DIR}"
+
+cd /opt/trusttunnel
+TT_DEEPLINK=$(./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_TRUSTTUNNEL}" --format deeplink)
+./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_TRUSTTUNNEL}" --format toml > "${CLIENT_DIR}/trusttunnel_client.toml"
+
+VLESS_LINK="vless://${VLESS_UUID}@${SERVER_IP}:${PORT_VLESS_REALITY_TCP}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${TRUSTTUNNEL_USERNAME}-VLESS"
+TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_TROJAN_TLS_TCP}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
+HY2_LINK="hy2://${HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_HYSTERIA2_QUIC_UDP}?sni=${DOMAIN}#${TRUSTTUNNEL_USERNAME}-Hysteria2"
+
+cat > "${CLIENT_DIR}/links.txt" <<LINKS_EOF
+VLESS+Reality:
+${VLESS_LINK}
+
+Trojan:
+${TROJAN_LINK}
+
+Hysteria2:
+${HY2_LINK}
+
+TrustTunnel Deeplink:
+${TT_DEEPLINK}
+LINKS_EOF
+
+cat > "${CLIENT_DIR}/singbox_client.json" <<JSON_EOF
+{
+  "log": {"level": "info"},
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-reality",
+      "server": "${SERVER_IP}",
+      "server_port": ${PORT_VLESS_REALITY_TCP},
+      "uuid": "${VLESS_UUID}",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "${REALITY_SERVER_NAME}",
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "reality": {
+          "enabled": true,
+          "public_key": "${REALITY_PUBLIC_KEY}",
+          "short_id": "${REALITY_SHORT_ID}"
+        }
+      }
+    }
+  ]
+}
+JSON_EOF
+
+echo "========================================================="
+echo "✅ Server configured successfully."
+echo "Client configurations have been saved to: ${CLIENT_DIR}/"
+echo "  1. trusttunnel_client.toml  (For TrustTunnel CLI / App)"
+echo "  2. singbox_client.json      (For sing-box clients)"
+echo "  3. links.txt                (vless://, trojan:// URIs & TT link)"
+echo "========================================================="
