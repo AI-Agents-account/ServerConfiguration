@@ -94,6 +94,20 @@ ls -la /etc/letsencrypt/live/$DOMAIN/
 - на сервере — в `/etc/sing-box/config.json`, который генерирует `vpn_install/setup.sh`
 - у клиентов — **в конфиге клиента** (вы выбираете нужный профиль/тип и соответствующий порт). В папке `vpn_install/clients/` лежат готовые шаблоны под VLESS+Reality.
 
+## Добавление новых пользователей (автоматически)
+
+На VPS можно автоматически добавить нового пользователя и получить готовые конфиги в папке `users/<platform>/<user>/`:
+
+```bash
+sudo bash vpn_install/add_user.sh --platform iphone --user alice
+sudo bash vpn_install/add_user.sh --platform windows --user bob
+```
+
+Скрипт:
+- добавляет учётку в `/etc/sing-box/config.json` (VLESS/Trojan/Hysteria2)
+- рестартит `sing-box`
+- экспортирует готовые клиентские JSON в `/etc/sing-box/users/...`
+
 ## Готовые клиентские конфиги
 
 В папке `vpn_install/clients/` лежат шаблоны (замените плейсхолдеры `${VLESS_UUID}`, `${REALITY_PUBLIC_KEY}`, `${REALITY_SHORT_ID}` на ваши значения):
