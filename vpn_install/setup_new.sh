@@ -494,12 +494,169 @@ cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
 }
 HY2_EOF
 
+# iOS sing-box (TUN) configs (full-tunnel)
+# Note: iOS often needs explicit DNS routing to avoid "no downlink" symptoms.
+cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "inet4_address": "172.19.0.1/30",
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system",
+      "sniff": true
+    }
+  ],
+  "outbounds": [
+    {"type": "dns", "tag": "dns-out"},
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "${SERVER_IP}",
+      "server_port": ${PORT_PUBLIC},
+      "uuid": "${VLESS_UUID}",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "${REALITY_SERVER_NAME}",
+        "alpn": ["h2", "http/1.1"],
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "reality": {
+          "enabled": true,
+          "public_key": "${REALITY_PUBLIC_KEY}",
+          "short_id": "${REALITY_SHORT_ID}"
+        }
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [
+      {"protocol": "dns", "outbound": "dns-out"}
+    ],
+    "final": "proxy"
+  }
+}
+IOS_VLESS_EOF
+
+cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "inet4_address": "172.19.0.1/30",
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system",
+      "sniff": true
+    }
+  ],
+  "outbounds": [
+    {"type": "dns", "tag": "dns-out"},
+    {
+      "type": "trojan",
+      "tag": "proxy",
+      "server": "${SERVER_IP}",
+      "server_port": ${PORT_PUBLIC},
+      "password": "${TROJAN_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": ["h2", "http/1.1"],
+        "utls": {"enabled": true, "fingerprint": "chrome"}
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [
+      {"protocol": "dns", "outbound": "dns-out"}
+    ],
+    "final": "proxy"
+  }
+}
+IOS_TROJAN_EOF
+
+cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "inet4_address": "172.19.0.1/30",
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system",
+      "sniff": true
+    }
+  ],
+  "outbounds": [
+    {"type": "dns", "tag": "dns-out"},
+    {
+      "type": "hysteria2",
+      "tag": "proxy",
+      "server": "${SERVER_IP}",
+      "server_port": ${PORT_PUBLIC},
+      "password": "${HYSTERIA2_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": ["h3"]
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [
+      {"protocol": "dns", "outbound": "dns-out"}
+    ],
+    "final": "proxy"
+  }
+}
+IOS_HY2_EOF
+
 echo "========================================================="
 echo "✅ Server configured successfully."
 echo "Client configurations have been saved to: ${CLIENT_DIR}/"
-echo "  1. trusttunnel_client.toml    (For TrustTunnel CLI / App)"
-echo "  2. singbox_vless.json         (sing-box VLESS config)"
-echo "  3. singbox_trojan.json        (sing-box Trojan config)"
-echo "  4. singbox_hysteria2.json     (sing-box Hysteria2 config)"
-echo "  5. links.txt                  (vless://, trojan:// URIs & TT link)"
+echo "  1. trusttunnel_client.toml        (For TrustTunnel CLI / App)"
+echo "  2. singbox_vless.json             (sing-box VLESS config, local proxy)"
+echo "  3. singbox_trojan.json            (sing-box Trojan config, local proxy)"
+echo "  4. singbox_hysteria2.json         (sing-box Hysteria2 config, local proxy)"
+echo "  5. singbox_ios_vless_tun.json     (iOS sing-box VLESS config, full-tunnel)"
+echo "  6. singbox_ios_trojan_tun.json    (iOS sing-box Trojan config, full-tunnel)"
+echo "  7. singbox_ios_hysteria2_tun.json (iOS sing-box Hysteria2 config, full-tunnel)"
+echo "  8. links.txt                      (vless://, trojan:// URIs & TT link)"
 echo "========================================================="
