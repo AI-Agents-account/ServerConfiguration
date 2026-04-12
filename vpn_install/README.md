@@ -14,6 +14,9 @@
 Актуальные (используйте их):
 - `setup.sh` — установка/настройка сервера
 - `add_user.sh` — добавление пользователя и генерация клиентских конфигов
+- `stop.sh` — остановка сервисов (sing-box / trusttunnel / nginx)
+- `restart.sh` — перезапуск сервисов (sing-box / trusttunnel / nginx)
+- `check.sh` — self-check (порты, статусы, TrustTunnel TLS issuer, e2e curl через локальные клиентские конфиги)
 
 Исторические (оставлены для сравнения/отката):
 - `setup_old.sh`
