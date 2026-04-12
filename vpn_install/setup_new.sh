@@ -397,6 +397,32 @@ cd /opt/trusttunnel
 TT_DEEPLINK=$(./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_PUBLIC}" --format deeplink)
 ./trusttunnel_endpoint vpn.toml hosts.toml -c "${TRUSTTUNNEL_USERNAME}" -a "${SERVER_IP}:${PORT_PUBLIC}" --format toml > "${CLIENT_DIR}/trusttunnel_client.toml"
 
+# TrustTunnel manual-entry helper (some clients require manual fields besides deeplink)
+TT_CERT_PEM=""
+if [[ -f /opt/trusttunnel/cert.pem ]]; then
+  TT_CERT_PEM="$(cat /opt/trusttunnel/cert.pem)"
+fi
+TT_USERNAME="${TRUSTTUNNEL_USERNAME}"
+TT_PASSWORD="${TRUSTTUNNEL_PASSWORD}"  # from earlier in the script
+TT_ADDR="${SERVER_IP}:${PORT_PUBLIC}"
+TT_HOSTNAME="${TRUSTTUNNEL_DOMAIN}"
+TT_OUT_PATH="${CLIENT_DIR}/trusttunnel_manual.json" TT_CERT_PEM="$TT_CERT_PEM" TT_ADDR="$TT_ADDR" TT_HOSTNAME="$TT_HOSTNAME" TT_USERNAME="$TT_USERNAME" TT_PASSWORD="$TT_PASSWORD" python3 - <<'PY'
+import json, os
+manual = {
+  "address": os.environ.get("TT_ADDR", ""),
+  "domain_name_from_server_cert": os.environ.get("TT_HOSTNAME", ""),
+  "username": os.environ.get("TT_USERNAME", ""),
+  "password": os.environ.get("TT_PASSWORD", ""),
+  "dns_server_addresses": ["77.88.8.8", "77.88.8.1"],
+  "client_random_hex_seq": "",
+  "self_signed_certificate": os.environ.get("TT_CERT_PEM", ""),
+}
+out_path = os.environ.get("TT_OUT_PATH")
+with open(out_path, "w", encoding="utf-8") as f:
+  json.dump(manual, f, ensure_ascii=False, indent=2)
+  f.write("\n")
+PY
+
 VLESS_LINK="vless://${VLESS_UUID}@${SERVER_IP}:${PORT_PUBLIC}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${TRUSTTUNNEL_USERNAME}-VLESS"
 TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
 HY2_LINK="hy2://${HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?sni=${DOMAIN}#${TRUSTTUNNEL_USERNAME}-Hysteria2"
