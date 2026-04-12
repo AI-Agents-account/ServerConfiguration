@@ -15,6 +15,7 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2;
 # Defaults
 : "${ENABLE_LETSENCRYPT:=1}"
 : "${ALLOW_SELF_SIGNED:=1}"
+: "${REQUIRE_TRUSTTUNNEL_LE:=1}"  # if 1: fail setup if TrustTunnel cannot use a Let's Encrypt cert
 : "${PORT_PUBLIC:=443}" # public entrypoint for ALL protocols (TCP/UDP)
 
 # Internal ports (loopback only). Public traffic is multiplexed on PORT_PUBLIC.
@@ -193,11 +194,22 @@ systemctl restart nginx || true
 systemctl enable nginx || true
 
 # TrustTunnel setup (Non-interactive)
+if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
+  if [[ "${ENABLE_LETSENCRYPT}" != "1" ]]; then
+    echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 requires ENABLE_LETSENCRYPT=1" >&2
+    exit 20
+  fi
+  if [[ "${FULLCHAIN}" != /etc/letsencrypt/* ]]; then
+    echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 but FULLCHAIN is not a Let's Encrypt path (${FULLCHAIN})." >&2
+    echo "[TrustTunnel] Likely cause: certbot failed (often inbound :80 blocked) and script fell back to self-signed." >&2
+    exit 20
+  fi
+fi
 cd /opt/trusttunnel
 cp "${FULLCHAIN}" /opt/trusttunnel/cert.pem
 cp "${PRIVKEY}" /opt/trusttunnel/key.pem
 # TrustTunnel wizard can hang on some hosts even in non-interactive mode.
-# Run with a timeout and fall back to self-signed if the provided-cert path fails.
+# Run with a timeout. If REQUIRE_TRUSTTUNNEL_LE=1, do NOT fall back to self-signed.
 if ! timeout 180s ./setup_wizard -m non-interactive \
     -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
     -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
@@ -207,7 +219,13 @@ if ! timeout 180s ./setup_wizard -m non-interactive \
     --cert-type provided \
     --cert-chain-path /opt/trusttunnel/cert.pem \
     --cert-key-path /opt/trusttunnel/key.pem; then
-  echo "[TrustTunnel] setup_wizard failed or timed out with provided cert; retrying with self-signed..." >&2
+  if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
+    echo "[TrustTunnel] ERROR: setup_wizard failed with provided cert and REQUIRE_TRUSTTUNNEL_LE=1. Refusing self-signed fallback." >&2
+    echo "[TrustTunnel] Check: DNS for TRUSTTUNNEL_DOMAIN, inbound :80 for certbot HTTP-01, and that cert SAN includes TRUSTTUNNEL_DOMAIN." >&2
+    exit 21
+  fi
+
+  echo "[TrustTunnel] setup_wizard failed or timed out with provided cert; retrying with self-signed (REQUIRE_TRUSTTUNNEL_LE=0)..." >&2
   timeout 180s ./setup_wizard -m non-interactive \
       -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
       -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
