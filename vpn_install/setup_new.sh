@@ -523,7 +523,7 @@ cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
     {
       "type": "vless",
       "tag": "proxy",
-      "server": "${SERVER_IP}",
+      "server": "${DOMAIN}",
       "server_port": ${PORT_PUBLIC},
       "uuid": "${VLESS_UUID}",
       "flow": "xtls-rprx-vision",
@@ -578,7 +578,7 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
     {
       "type": "trojan",
       "tag": "proxy",
-      "server": "${SERVER_IP}",
+      "server": "${DOMAIN}",
       "server_port": ${PORT_PUBLIC},
       "password": "${TROJAN_PASSWORD}",
       "tls": {
@@ -627,7 +627,7 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
     {
       "type": "hysteria2",
       "tag": "proxy",
-      "server": "${SERVER_IP}",
+      "server": "${DOMAIN}",
       "server_port": ${PORT_PUBLIC},
       "password": "${HYSTERIA2_PASSWORD}",
       "tls": {
