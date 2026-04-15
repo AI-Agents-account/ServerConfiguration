@@ -551,11 +551,11 @@ HY2_EOF
 # Note: iOS often needs explicit DNS routing to avoid "no downlink" symptoms.
 cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
 {
-  "log": {"level": "info", "timestamp": true},
+  "log": {"level": "debug", "timestamp": true},
   "dns": {
     "servers": [
-      {"tag": "yandex1", "address": "77.88.8.8", "detour": "proxy"},
-      {"tag": "yandex2", "address": "77.88.8.1", "detour": "proxy"}
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
@@ -609,25 +609,16 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
   "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {"tag": "yandex1", "address": "77.88.8.8", "detour": "proxy"},
-      {"tag": "yandex2", "address": "77.88.8.1", "detour": "proxy"}
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
   },
   "inbounds": [
-    {
-      "type": "tun",
-      "tag": "tun-in",
-      "inet4_address": "172.19.0.1/30",
-      "auto_route": true,
-      "strict_route": true,
-      "stack": "system",
-      "sniff": true
-    }
+    {"type": "tun", "tag": "tun-in", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": true, "stack": "system", "sniff": true}
   ],
   "outbounds": [
-    {"type": "dns", "tag": "dns-out"},
     {
       "type": "trojan",
       "tag": "proxy",
@@ -638,18 +629,12 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
         "enabled": true,
         "server_name": "${DOMAIN}",
         "alpn": ["h2", "http/1.1"],
-        "utls": {"enabled": true, "fingerprint": "chrome"}
+        "insecure": false
       }
     },
     {"type": "direct", "tag": "direct"}
   ],
-  "route": {
-    "auto_detect_interface": true,
-    "rules": [
-      {"protocol": "dns", "outbound": "dns-out"}
-    ],
-    "final": "proxy"
-  }
+  "route": {"auto_detect_interface": true, "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}], "final": "proxy"}
 }
 IOS_TROJAN_EOF
 
@@ -658,25 +643,16 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
   "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {"tag": "yandex1", "address": "77.88.8.8", "detour": "proxy"},
-      {"tag": "yandex2", "address": "77.88.8.1", "detour": "proxy"}
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
   },
   "inbounds": [
-    {
-      "type": "tun",
-      "tag": "tun-in",
-      "inet4_address": "172.19.0.1/30",
-      "auto_route": true,
-      "strict_route": true,
-      "stack": "system",
-      "sniff": true
-    }
+    {"type": "tun", "tag": "tun-in", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": true, "stack": "system", "sniff": true}
   ],
   "outbounds": [
-    {"type": "dns", "tag": "dns-out"},
     {
       "type": "hysteria2",
       "tag": "proxy",
@@ -686,18 +662,13 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "alpn": ["h3"]
+        "alpn": ["h3"],
+        "insecure": true
       }
     },
     {"type": "direct", "tag": "direct"}
   ],
-  "route": {
-    "auto_detect_interface": true,
-    "rules": [
-      {"protocol": "dns", "outbound": "dns-out"}
-    ],
-    "final": "proxy"
-  }
+  "route": {"auto_detect_interface": true, "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}], "final": "proxy"}
 }
 IOS_HY2_EOF
 
