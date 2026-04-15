@@ -260,13 +260,6 @@ cat >/etc/sing-box/config.json <<EOF
       "network": "tcp"
     },
     {
-      "type": "direct",
-      "tag": "udp-mux",
-      "listen": "::",
-      "listen_port": ${PORT_PUBLIC},
-      "network": "udp"
-    },
-    {
       "type": "vless",
       "tag": "vless-reality",
       "listen": "127.0.0.1",
@@ -298,26 +291,12 @@ cat >/etc/sing-box/config.json <<EOF
         "key_path": "${PRIVKEY}"
       }
     },
-    {
-      "type": "hysteria2",
-      "tag": "hysteria2",
-      "listen": "127.0.0.1",
-      "listen_port": ${PORT_HYSTERIA2_QUIC_UDP},
-      "users": [{"name": "user1", "password": "${HYSTERIA2_PASSWORD}"}],
-      "tls": {
-        "enabled": true,
-        "server_name": "${DOMAIN}",
-        "alpn": ["h3"],
-        "certificate_path": "${FULLCHAIN}",
-        "key_path": "${PRIVKEY}"
-      }
-    }
   ],
   "outbounds": [{"type": "direct", "tag": "direct"}],
   "route": {
     "rules": [
       {
-        "inbound": ["tcp-mux", "udp-mux"],
+        "inbound": ["tcp-mux"],
         "action": "sniff"
       },
       {
@@ -351,21 +330,6 @@ cat >/etc/sing-box/config.json <<EOF
         "override_address": "127.0.0.1",
         "override_port": ${PORT_NGINX}
       },
-      {
-        "inbound": "udp-mux",
-        "domain": ["${TRUSTTUNNEL_DOMAIN}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_TRUSTTUNNEL}
-      },
-      {
-        "inbound": "udp-mux",
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_HYSTERIA2_QUIC_UDP}
-      }
     ],
     "final": "direct"
   }
@@ -395,6 +359,46 @@ EOF
 systemctl daemon-reload || true
 systemctl enable sing-box || true
 systemctl restart sing-box || true
+
+# Standalone Hysteria2 server on UDP :443 (separate from sing-box)
+HYSTERIA_VERSION="${HYSTERIA_VERSION:-2.8.1}"
+HYSTERIA_URL="https://github.com/apernet/hysteria/releases/download/app/v${HYSTERIA_VERSION}/hysteria-linux-amd64"
+if [[ ! -x /usr/local/bin/hysteria ]]; then
+  echo "Installing hysteria v${HYSTERIA_VERSION}..."
+  curl -fsSL -o /usr/local/bin/hysteria "${HYSTERIA_URL}"
+  chmod +x /usr/local/bin/hysteria
+fi
+
+install -d -m 0755 /etc/hysteria
+cat >/etc/hysteria/config.yaml <<HYCFG
+auth:
+  type: password
+  password: "${HYSTERIA2_PASSWORD}"
+
+listen: :${PORT_PUBLIC}
+
+tls:
+  cert: ${FULLCHAIN}
+  key: ${PRIVKEY}
+HYCFG
+
+cat >/etc/systemd/system/hysteria.service <<'HYUNIT'
+[Unit]
+Description=Hysteria2 Server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
+Restart=on-failure
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+HYUNIT
+
+systemctl daemon-reload || true
+systemctl enable hysteria || true
+systemctl restart hysteria || true
 
 # Save settings for add_user_new.sh
 # Detect the VPS public IPv4. Do NOT rely on ifconfig.me here because the host may be behind a full-tunnel (egress != ingress).
