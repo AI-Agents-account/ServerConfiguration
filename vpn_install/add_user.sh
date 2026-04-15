@@ -130,23 +130,42 @@ TrustTunnel Deeplink:
 ${TT_DEEPLINK}
 LINKS_EOF
 
-cat > "${CLIENT_DIR}/singbox_vless.json" <<VLESS_EOF
+# Windows full-tunnel configs (sing-box TUN)
+cat > "${CLIENT_DIR}/singbox_windows_vless_tun.json" <<WIN_VLESS_TUN_EOF
 {
-  "log": {"level": "info"},
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
   "inbounds": [
-    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "singbox0",
+      "address": ["172.19.0.1/30"],
+      "mtu": 1500,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system"
+    }
   ],
   "outbounds": [
     {
       "type": "vless",
-      "tag": "out",
-      "server": "${SERVER_IP}",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
       "server_port": ${PORT_PUBLIC},
       "uuid": "${NEW_VLESS_UUID}",
       "flow": "xtls-rprx-vision",
       "tls": {
         "enabled": true,
         "server_name": "${REALITY_SERVER_NAME}",
+        "alpn": ["h2", "http/1.1"],
         "utls": {"enabled": true, "fingerprint": "chrome"},
         "reality": {
           "enabled": true,
@@ -154,59 +173,119 @@ cat > "${CLIENT_DIR}/singbox_vless.json" <<VLESS_EOF
           "short_id": "${REALITY_SHORT_ID}"
         }
       }
-    }
+    },
+    {"type": "direct", "tag": "direct"}
   ],
-  "route": {"final": "out"}
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "yandex1",
+    "rules": [
+      {"network": "udp", "port": 53, "action": "hijack-dns"}
+    ],
+    "final": "proxy"
+  }
 }
-VLESS_EOF
+WIN_VLESS_TUN_EOF
 
-cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
+cat > "${CLIENT_DIR}/singbox_windows_trojan_tun.json" <<WIN_TROJAN_TUN_EOF
 {
-  "log": {"level": "info"},
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
   "inbounds": [
-    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "singbox0",
+      "address": ["172.19.0.1/30"],
+      "mtu": 1500,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system"
+    }
   ],
   "outbounds": [
     {
       "type": "trojan",
-      "tag": "out",
-      "server": "${SERVER_IP}",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
       "server_port": ${PORT_PUBLIC},
       "password": "${NEW_TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "utls": {"enabled": true, "fingerprint": "chrome"}
+        "alpn": ["h2", "http/1.1"],
+        "insecure": false
       }
-    }
+    },
+    {"type": "direct", "tag": "direct"}
   ],
-  "route": {"final": "out"}
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "yandex1",
+    "rules": [
+      {"network": "udp", "port": 53, "action": "hijack-dns"}
+    ],
+    "final": "proxy"
+  }
 }
-TROJAN_EOF
+WIN_TROJAN_TUN_EOF
 
-cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
+cat > "${CLIENT_DIR}/singbox_windows_hysteria2_tun.json" <<WIN_HY2_TUN_EOF
 {
-  "log": {"level": "info"},
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
   "inbounds": [
-    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "singbox0",
+      "address": ["172.19.0.1/30"],
+      "mtu": 1500,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system"
+    }
   ],
   "outbounds": [
     {
       "type": "hysteria2",
-      "tag": "out",
-      "server": "${SERVER_IP}",
+      "tag": "proxy",
+      "server": "${DOMAIN}",
       "server_port": ${PORT_PUBLIC},
       "password": "${NEW_HYSTERIA2_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "alpn": ["h3"]
+        "alpn": ["h3"],
+        "insecure": true
       }
-    }
+    },
+    {"type": "direct", "tag": "direct"}
   ],
-  "route": {"final": "out"}
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "yandex1",
+    "rules": [
+      {"network": "udp", "port": 53, "action": "hijack-dns"}
+    ],
+    "final": "proxy"
+  }
 }
-HY2_EOF
+WIN_HY2_TUN_EOF
 
 # iOS sing-box (TUN) configs (full-tunnel)
 # Note: iOS often needs explicit DNS routing to avoid "no downlink" symptoms.
