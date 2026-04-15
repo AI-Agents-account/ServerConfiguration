@@ -33,7 +33,14 @@ main() {
   ip route flush table lip 2>/dev/null || true
 
   log "Restoring direct default route via uplink..."
-  ip route del default dev tun0 2>/dev/null || true
+
+  # Guard against missing tun0 and/or missing default route via tun0.
+  if ip link show tun0 >/dev/null 2>&1; then
+    if ip route show default dev tun0 >/dev/null 2>&1; then
+      ip route del default dev tun0 2>/dev/null || true
+    fi
+  fi
+
   if [[ -n "${gw:-}" && -n "${iface:-}" ]]; then
     ip route replace default via "$gw" dev "$iface" metric 100
   fi

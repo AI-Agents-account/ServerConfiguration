@@ -8,12 +8,22 @@ source /etc/vpn_settings.env 2>/dev/null || true
 
 ok "Checking services..."
 sudo systemctl is-active --quiet sing-box || fail "sing-box is not active"
-sudo systemctl is-active --quiet trusttunnel || fail "trusttunnel is not active"
+# TrustTunnel may be disabled/optional depending on env; warn instead of fail.
+if systemctl list-unit-files | grep -q '^trusttunnel\.service'; then
+  sudo systemctl is-active --quiet trusttunnel || fail "trusttunnel is not active"
+else
+  echo "[WARN] trusttunnel.service not installed; skipping"
+fi
+sudo systemctl is-active --quiet hysteria || fail "hysteria (Hysteria2 standalone) is not active"
 
-ok "Checking listeners (expected: :443 tcp+udp, :9443 loopback)..."
+ok "Checking listeners (expected: TCP :443 by sing-box, UDP :443 by hysteria; TrustTunnel on 127.0.0.1:9443 if enabled)..."
 sudo ss -lntup | grep -qE 'LISTEN.*\*:443' || fail "no TCP :443 listener"
-sudo ss -lnup  | grep -qE '\*:443' || fail "no UDP :443 listener"
-sudo ss -lntup | grep -qE '127\.0\.0\.1:9443' || fail "no TCP 127.0.0.1:9443 listener"
+# Ensure UDP :443 is served by hysteria (not sing-box)
+sudo ss -lnup | grep -qE '\*:443' || fail "no UDP :443 listener"
+sudo ss -lnup | grep -qE '\*:443.*hysteria' || fail "UDP :443 is not owned by hysteria"
+if systemctl list-unit-files | grep -q '^trusttunnel\.service'; then
+  sudo ss -lntup | grep -qE '127\.0\.0\.1:9443' || fail "no TCP 127.0.0.1:9443 listener"
+fi
 
 if [[ -n "${TRUSTTUNNEL_DOMAIN:-}" ]]; then
   ok "Checking TrustTunnel TLS issuer on 127.0.0.1:9443 (should be Let's Encrypt)..."

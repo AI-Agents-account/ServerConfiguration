@@ -194,20 +194,25 @@ systemctl restart nginx || true
 systemctl enable nginx || true
 
 # TrustTunnel setup (Non-interactive)
+# NOTE: FULLCHAIN/PRIVKEY may be repointed to /etc/sing-box/certs later; TrustTunnel must use the original Let's Encrypt files.
+LE_FULLCHAIN="${CERT_PATH}/fullchain.pem"
+LE_PRIVKEY="${CERT_PATH}/privkey.pem"
+
 if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
   if [[ "${ENABLE_LETSENCRYPT}" != "1" ]]; then
     echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 requires ENABLE_LETSENCRYPT=1" >&2
     exit 20
   fi
-  if [[ "${FULLCHAIN}" != /etc/letsencrypt/* ]]; then
-    echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 but FULLCHAIN is not a Let's Encrypt path (${FULLCHAIN})." >&2
-    echo "[TrustTunnel] Likely cause: certbot failed (often inbound :80 blocked) and script fell back to self-signed." >&2
+  if [[ ! -f "${LE_FULLCHAIN}" || ! -f "${LE_PRIVKEY}" ]]; then
+    echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 but Let's Encrypt files are missing: ${LE_FULLCHAIN} / ${LE_PRIVKEY}" >&2
+    echo "[TrustTunnel] Likely cause: certbot failed (often inbound :80 blocked)." >&2
     exit 20
   fi
 fi
+
 cd /opt/trusttunnel
-cp "${FULLCHAIN}" /opt/trusttunnel/cert.pem
-cp "${PRIVKEY}" /opt/trusttunnel/key.pem
+cp "${LE_FULLCHAIN}" /opt/trusttunnel/cert.pem
+cp "${LE_PRIVKEY}" /opt/trusttunnel/key.pem
 # TrustTunnel wizard can hang on some hosts even in non-interactive mode.
 # Run with a timeout. If REQUIRE_TRUSTTUNNEL_LE=1, do NOT fall back to self-signed.
 if ! timeout 180s ./setup_wizard -m non-interactive \
@@ -255,13 +260,6 @@ cat >/etc/sing-box/config.json <<EOF
       "network": "tcp"
     },
     {
-      "type": "direct",
-      "tag": "udp-mux",
-      "listen": "::",
-      "listen_port": ${PORT_PUBLIC},
-      "network": "udp"
-    },
-    {
       "type": "vless",
       "tag": "vless-reality",
       "listen": "127.0.0.1",
@@ -293,26 +291,12 @@ cat >/etc/sing-box/config.json <<EOF
         "key_path": "${PRIVKEY}"
       }
     },
-    {
-      "type": "hysteria2",
-      "tag": "hysteria2",
-      "listen": "127.0.0.1",
-      "listen_port": ${PORT_HYSTERIA2_QUIC_UDP},
-      "users": [{"name": "user1", "password": "${HYSTERIA2_PASSWORD}"}],
-      "tls": {
-        "enabled": true,
-        "server_name": "${DOMAIN}",
-        "alpn": ["h3"],
-        "certificate_path": "${FULLCHAIN}",
-        "key_path": "${PRIVKEY}"
-      }
-    }
   ],
   "outbounds": [{"type": "direct", "tag": "direct"}],
   "route": {
     "rules": [
       {
-        "inbound": ["tcp-mux", "udp-mux"],
+        "inbound": ["tcp-mux"],
         "action": "sniff"
       },
       {
@@ -346,21 +330,6 @@ cat >/etc/sing-box/config.json <<EOF
         "override_address": "127.0.0.1",
         "override_port": ${PORT_NGINX}
       },
-      {
-        "inbound": "udp-mux",
-        "domain": ["${TRUSTTUNNEL_DOMAIN}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_TRUSTTUNNEL}
-      },
-      {
-        "inbound": "udp-mux",
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_HYSTERIA2_QUIC_UDP}
-      }
     ],
     "final": "direct"
   }
@@ -391,8 +360,52 @@ systemctl daemon-reload || true
 systemctl enable sing-box || true
 systemctl restart sing-box || true
 
+# Standalone Hysteria2 server on UDP :443 (separate from sing-box)
+HYSTERIA_VERSION="${HYSTERIA_VERSION:-2.8.1}"
+HYSTERIA_URL="https://github.com/apernet/hysteria/releases/download/app/v${HYSTERIA_VERSION}/hysteria-linux-amd64"
+if [[ ! -x /usr/local/bin/hysteria ]]; then
+  echo "Installing hysteria v${HYSTERIA_VERSION}..."
+  curl -fsSL -o /usr/local/bin/hysteria "${HYSTERIA_URL}"
+  chmod +x /usr/local/bin/hysteria
+fi
+
+install -d -m 0755 /etc/hysteria
+cat >/etc/hysteria/config.yaml <<HYCFG
+auth:
+  type: password
+  password: "${HYSTERIA2_PASSWORD}"
+
+listen: :${PORT_PUBLIC}
+
+tls:
+  cert: ${FULLCHAIN}
+  key: ${PRIVKEY}
+HYCFG
+
+cat >/etc/systemd/system/hysteria.service <<'HYUNIT'
+[Unit]
+Description=Hysteria2 Server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
+Restart=on-failure
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+HYUNIT
+
+systemctl daemon-reload || true
+systemctl enable hysteria || true
+systemctl restart hysteria || true
+
 # Save settings for add_user_new.sh
-SERVER_IP=$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")
+# Detect the VPS public IPv4. Do NOT rely on ifconfig.me here because the host may be behind a full-tunnel (egress != ingress).
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+if [[ -z "${SERVER_IP}" ]]; then
+  SERVER_IP="$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")"
+fi
 cat >/etc/vpn_settings.env <<ENV_EOF
 SERVER_IP="${SERVER_IP}"
 PORT_PUBLIC="${PORT_PUBLIC}"
@@ -542,7 +555,7 @@ HY2_EOF
 # Note: iOS often needs explicit DNS routing to avoid "no downlink" symptoms.
 cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
 {
-  "log": {"level": "info", "timestamp": true},
+  "log": {"level": "debug", "timestamp": true},
   "dns": {
     "servers": [
       {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
@@ -607,18 +620,9 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
     "strategy": "ipv4_only"
   },
   "inbounds": [
-    {
-      "type": "tun",
-      "tag": "tun-in",
-      "inet4_address": "172.19.0.1/30",
-      "auto_route": true,
-      "strict_route": true,
-      "stack": "system",
-      "sniff": true
-    }
+    {"type": "tun", "tag": "tun-in", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": true, "stack": "system", "sniff": true}
   ],
   "outbounds": [
-    {"type": "dns", "tag": "dns-out"},
     {
       "type": "trojan",
       "tag": "proxy",
@@ -629,18 +633,12 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
         "enabled": true,
         "server_name": "${DOMAIN}",
         "alpn": ["h2", "http/1.1"],
-        "utls": {"enabled": true, "fingerprint": "chrome"}
+        "insecure": false
       }
     },
     {"type": "direct", "tag": "direct"}
   ],
-  "route": {
-    "auto_detect_interface": true,
-    "rules": [
-      {"protocol": "dns", "outbound": "dns-out"}
-    ],
-    "final": "proxy"
-  }
+  "route": {"auto_detect_interface": true, "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}], "final": "proxy"}
 }
 IOS_TROJAN_EOF
 
@@ -656,18 +654,9 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
     "strategy": "ipv4_only"
   },
   "inbounds": [
-    {
-      "type": "tun",
-      "tag": "tun-in",
-      "inet4_address": "172.19.0.1/30",
-      "auto_route": true,
-      "strict_route": true,
-      "stack": "system",
-      "sniff": true
-    }
+    {"type": "tun", "tag": "tun-in", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": true, "stack": "system", "sniff": true}
   ],
   "outbounds": [
-    {"type": "dns", "tag": "dns-out"},
     {
       "type": "hysteria2",
       "tag": "proxy",
@@ -677,18 +666,13 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "alpn": ["h3"]
+        "alpn": ["h3"],
+        "insecure": true
       }
     },
     {"type": "direct", "tag": "direct"}
   ],
-  "route": {
-    "auto_detect_interface": true,
-    "rules": [
-      {"protocol": "dns", "outbound": "dns-out"}
-    ],
-    "final": "proxy"
-  }
+  "route": {"auto_detect_interface": true, "rules": [{"network": "udp", "port": 53, "action": "hijack-dns"}], "final": "proxy"}
 }
 IOS_HY2_EOF
 

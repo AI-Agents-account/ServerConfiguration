@@ -1,0 +1,47 @@
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "singbox0",
+      "address": ["172.19.0.1/30"],
+      "mtu": 1500,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "proxy",
+      "server": "__SERVER__",
+      "server_port": __PORT__,
+      "password": "__PASSWORD__",
+      "tls": {
+        "enabled": true,
+        "server_name": "__TLS_SNI__",
+        "alpn": ["h3"],
+        "insecure": true
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "yandex1",
+    "rules": [
+      {"network": "udp", "port": 53, "action": "hijack-dns"}
+    ],
+    "final": "proxy"
+  }
+}
