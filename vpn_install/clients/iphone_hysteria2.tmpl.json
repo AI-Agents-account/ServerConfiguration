@@ -1,0 +1,44 @@
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+    ],
+    "final": "yandex1",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "inet4_address": "172.19.0.1/30",
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "system",
+      "sniff": true
+    }
+  ],
+  "outbounds": [
+    {"type": "dns", "tag": "dns-out"},
+    {
+      "type": "hysteria2",
+      "tag": "proxy",
+      "server": "__SERVER__",
+      "server_port": __PORT__,
+      "password": "__PASSWORD__",
+      "tls": {
+        "enabled": true,
+        "server_name": "__TLS_SNI__",
+        "alpn": ["h3"],
+        "insecure": false
+      }
+    },
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [{"protocol": "dns", "outbound": "dns-out"}],
+    "final": "proxy"
+  }
+}

@@ -2,8 +2,8 @@
   "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
-      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
@@ -12,31 +12,31 @@
     {
       "type": "tun",
       "tag": "tun-in",
-      "interface_name": "singbox0",
-      "address": ["172.19.0.1/30"],
-      "mtu": 1500,
+      "inet4_address": "172.19.0.1/30",
       "auto_route": true,
       "strict_route": true,
-      "stack": "system"
+      "stack": "system",
+      "sniff": true
     }
   ],
   "outbounds": [
+    {"type": "dns", "tag": "dns-out"},
     {
       "type": "vless",
       "tag": "proxy",
-      "server": "sbercloud.admishakov.ru",
-      "server_port": 443,
-      "uuid": "${VLESS_UUID}",
+      "server": "__SERVER__",
+      "server_port": __PORT__,
+      "uuid": "__UUID__",
       "flow": "xtls-rprx-vision",
       "tls": {
         "enabled": true,
-        "server_name": "www.yandex.ru",
+        "server_name": "__REALITY_SNI__",
         "alpn": ["h2", "http/1.1"],
         "utls": {"enabled": true, "fingerprint": "chrome"},
         "reality": {
           "enabled": true,
-          "public_key": "${REALITY_PUBLIC_KEY}",
-          "short_id": "${REALITY_SHORT_ID}"
+          "public_key": "__REALITY_PUBKEY__",
+          "short_id": "__REALITY_SHORTID__"
         }
       }
     },
@@ -44,10 +44,7 @@
   ],
   "route": {
     "auto_detect_interface": true,
-    "default_domain_resolver": "yandex1",
-    "rules": [
-      {"network": "udp", "port": 53, "action": "hijack-dns"}
-    ],
+    "rules": [{"protocol": "dns", "outbound": "dns-out"}],
     "final": "proxy"
   }
 }

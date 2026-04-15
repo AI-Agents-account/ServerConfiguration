@@ -1,0 +1,22 @@
+{
+  "log": {"level": "info"},
+  "inbounds": [
+    {"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 1080}
+  ],
+  "outbounds": [
+    {
+      "type": "trojan",
+      "tag": "out",
+      "server": "__SERVER__",
+      "server_port": __PORT__,
+      "password": "__PASSWORD__",
+      "tls": {
+        "enabled": true,
+        "server_name": "__TLS_SNI__",
+        "alpn": ["h2", "http/1.1"],
+        "utls": {"enabled": true, "fingerprint": "chrome"}
+      }
+    }
+  ],
+  "route": {"final": "out"}
+}
