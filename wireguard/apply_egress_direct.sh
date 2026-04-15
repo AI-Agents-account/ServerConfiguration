@@ -2,14 +2,29 @@
 set -euo pipefail
 
 WG_NET="${WG_NET:-10.66.66.0/24}"
-WAN_IF="${WAN_IF:-enp3s0}"
-WAN_GW="${WAN_GW:-176.109.104.1}"
+WAN_IF="${WAN_IF:-}"
+WAN_GW="${WAN_GW:-}"
 TABLE="${TABLE:-100}"
 PRIO="${PRIO:-1000}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2; exit 2; }; }
 need ip
 need iptables
+need awk
+
+# Auto-detect WAN interface / gateway if not provided
+if [[ -z "$WAN_IF" ]]; then
+  WAN_IF="$(ip route show default 0.0.0.0/0 2>/dev/null | awk '/default/ {for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+fi
+if [[ -z "$WAN_GW" ]]; then
+  WAN_GW="$(ip route show default 0.0.0.0/0 2>/dev/null | awk '/default/ {print $3; exit}')"
+fi
+
+if [[ -z "$WAN_IF" || -z "$WAN_GW" ]]; then
+  echo "ERROR: failed to auto-detect WAN_IF/WAN_GW. Provide them explicitly." >&2
+  echo "Hint: ip route show default" >&2
+  exit 3
+fi
 
 # 1) policy routing for WG subnet
 if ! ip rule show | grep -q "from ${WG_NET} lookup ${TABLE}"; then

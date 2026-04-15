@@ -89,8 +89,15 @@ ip route show default
 ip -br a
 ```
 
-В утилитах workaround (`apply_egress_direct.sh` / `remove_egress_direct.sh`) это параметр `WAN_IF`.
-По умолчанию он выставлен в `enp3s0`, потому что это наиболее безопасное предположение для текущего окружения, но **на других хостах его нужно переопределять**:
+В утилитах workaround (`apply_egress_direct.sh` / `remove_egress_direct.sh`) это параметры `WAN_IF` и `WAN_GW`.
+
+✅ **Если их не задавать**, скрипты пытаются **автоматически определить** WAN интерфейс и gateway через:
+
+```bash
+ip route show default
+```
+
+Если автоопределение не сработало (нестандартная сеть/маршруты), задайте вручную:
 
 ```bash
 WAN_IF=eth0 WAN_GW=<your_gw> sudo bash wireguard/apply_egress_direct.sh
