@@ -194,20 +194,25 @@ systemctl restart nginx || true
 systemctl enable nginx || true
 
 # TrustTunnel setup (Non-interactive)
+# NOTE: FULLCHAIN/PRIVKEY may be repointed to /etc/sing-box/certs later; TrustTunnel must use the original Let's Encrypt files.
+LE_FULLCHAIN="${CERT_PATH}/fullchain.pem"
+LE_PRIVKEY="${CERT_PATH}/privkey.pem"
+
 if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
   if [[ "${ENABLE_LETSENCRYPT}" != "1" ]]; then
     echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 requires ENABLE_LETSENCRYPT=1" >&2
     exit 20
   fi
-  if [[ "${FULLCHAIN}" != /etc/letsencrypt/* ]]; then
-    echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 but FULLCHAIN is not a Let's Encrypt path (${FULLCHAIN})." >&2
-    echo "[TrustTunnel] Likely cause: certbot failed (often inbound :80 blocked) and script fell back to self-signed." >&2
+  if [[ ! -f "${LE_FULLCHAIN}" || ! -f "${LE_PRIVKEY}" ]]; then
+    echo "[TrustTunnel] ERROR: REQUIRE_TRUSTTUNNEL_LE=1 but Let's Encrypt files are missing: ${LE_FULLCHAIN} / ${LE_PRIVKEY}" >&2
+    echo "[TrustTunnel] Likely cause: certbot failed (often inbound :80 blocked)." >&2
     exit 20
   fi
 fi
+
 cd /opt/trusttunnel
-cp "${FULLCHAIN}" /opt/trusttunnel/cert.pem
-cp "${PRIVKEY}" /opt/trusttunnel/key.pem
+cp "${LE_FULLCHAIN}" /opt/trusttunnel/cert.pem
+cp "${LE_PRIVKEY}" /opt/trusttunnel/key.pem
 # TrustTunnel wizard can hang on some hosts even in non-interactive mode.
 # Run with a timeout. If REQUIRE_TRUSTTUNNEL_LE=1, do NOT fall back to self-signed.
 if ! timeout 180s ./setup_wizard -m non-interactive \
@@ -392,7 +397,11 @@ systemctl enable sing-box || true
 systemctl restart sing-box || true
 
 # Save settings for add_user_new.sh
-SERVER_IP=$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")
+# Detect the VPS public IPv4. Do NOT rely on ifconfig.me here because the host may be behind a full-tunnel (egress != ingress).
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+if [[ -z "${SERVER_IP}" ]]; then
+  SERVER_IP="$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")"
+fi
 cat >/etc/vpn_settings.env <<ENV_EOF
 SERVER_IP="${SERVER_IP}"
 PORT_PUBLIC="${PORT_PUBLIC}"
