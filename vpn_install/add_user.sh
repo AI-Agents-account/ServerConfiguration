@@ -16,6 +16,9 @@ else
   echo "Warning: ENV file '${ENV_FILE}' not found. Using default domain settings." >&2
 fi
 
+VPN_INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATES_DIR="${VPN_INSTALL_DIR}/clients"
+
 SINGBOX_CONFIG="/etc/sing-box/config.json"
 if [[ ! -f "$SINGBOX_CONFIG" ]]; then
   echo "Error: $SINGBOX_CONFIG not found. Is sing-box installed via setup.sh?" >&2

@@ -10,6 +10,9 @@ fi
 # shellcheck disable=SC1090
 source "${ENV_FILE}"
 
+VPN_INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATES_DIR="${VPN_INSTALL_DIR}/clients"
+
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2; exit 3; }; }
 
 # Defaults
@@ -676,6 +679,39 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
 }
 IOS_HY2_EOF
 
+# Windows sing-box (TUN) configs (full-tunnel)
+# Generated from templates in vpn_install/clients
+python3 - <<'PY'
+import os, pathlib
+
+templates_dir = pathlib.Path(os.environ.get('TEMPLATES_DIR',''))
+client_dir = pathlib.Path(os.environ['CLIENT_DIR'])
+
+mapping = {
+  '__SERVER__': os.environ['DOMAIN'],
+  '__PORT__': os.environ['PORT_PUBLIC'],
+  '__UUID__': os.environ['VLESS_UUID'],
+  '__PASSWORD__': os.environ.get('TROJAN_PASSWORD',''),
+  '__TLS_SNI__': os.environ['DOMAIN'],
+  '__REALITY_SERVER_NAME__': os.environ['REALITY_SERVER_NAME'],
+  '__REALITY_PUBKEY__': os.environ['REALITY_PUBLIC_KEY'],
+  '__REALITY_SHORTID__': os.environ['REALITY_SHORT_ID'],
+}
+
+def render(tmpl_name: str, out_name: str, extra: dict | None = None):
+  src = (templates_dir / tmpl_name).read_text(encoding='utf-8')
+  m = dict(mapping)
+  if extra:
+    m.update(extra)
+  for k,v in m.items():
+    src = src.replace(k, str(v))
+  (client_dir / out_name).write_text(src + "\n", encoding='utf-8')
+
+render('windows_vless_reality_tun.tmpl.json', 'singbox_windows_vless_tun.json')
+render('windows_trojan_tun.tmpl.json', 'singbox_windows_trojan_tun.json')
+render('windows_hysteria2_tun.tmpl.json', 'singbox_windows_hysteria2_tun.json', {'__PASSWORD__': os.environ.get('HYSTERIA2_PASSWORD','')})
+PY
+
 echo "========================================================="
 echo "✅ Server configured successfully."
 echo "Client configurations have been saved to: ${CLIENT_DIR}/"
@@ -686,5 +722,8 @@ echo "  4. singbox_hysteria2.json         (sing-box Hysteria2 config, local prox
 echo "  5. singbox_ios_vless_tun.json     (iOS sing-box VLESS config, full-tunnel)"
 echo "  6. singbox_ios_trojan_tun.json    (iOS sing-box Trojan config, full-tunnel)"
 echo "  7. singbox_ios_hysteria2_tun.json (iOS sing-box Hysteria2 config, full-tunnel)"
-echo "  8. links.txt                      (vless://, trojan:// URIs & TT link)"
+echo "  8. singbox_windows_vless_tun.json     (Windows sing-box VLESS config, full-tunnel)"
+echo "  9. singbox_windows_trojan_tun.json    (Windows sing-box Trojan config, full-tunnel)"
+echo " 10. singbox_windows_hysteria2_tun.json (Windows sing-box Hysteria2 config, full-tunnel)"
+echo " 11. links.txt                      (vless://, trojan:// URIs & TT link)"
 echo "========================================================="
