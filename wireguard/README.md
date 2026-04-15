@@ -37,6 +37,26 @@ sudo bash wireguard/setup.sh greenapple
 EGRESS_IF=enp3s0 sudo bash wireguard/setup.sh greenapple
 ```
 
+### Скрипты-утилиты (workaround)
+
+В пакете также есть 2 утилиты, которые можно применять **на уже настроенном** сервере, не перегенерируя ключи WireGuard:
+
+- `wireguard/apply_egress_direct.sh` — включает direct-egress для подсети WireGuard:
+  - добавляет policy routing `from WG_NET -> table 100 -> default via WAN_GW dev WAN_IF`
+  - добавляет NAT (MASQUERADE) для `WG_NET` на `WAN_IF`
+  - применяется как быстрый диагностический шаг, если подозрение, что egress через `tun0` ломает forwarded-трафик
+
+- `wireguard/remove_egress_direct.sh` — best-effort откат:
+  - удаляет NAT для `WG_NET` на `WAN_IF`
+  - удаляет `ip rule` и `default` route из таблицы `TABLE`
+
+Пример:
+
+```bash
+sudo bash wireguard/apply_egress_direct.sh
+sudo bash wireguard/remove_egress_direct.sh
+```
+
 ---
 
 ## Параметры (env)
@@ -51,6 +71,29 @@ EGRESS_IF=tun0
 DNS_LISTEN_IP=10.66.66.1
 DNS_UPSTREAM1=8.8.8.8
 DNS_UPSTREAM2=8.8.4.4
+```
+
+### Почему в примере direct-egress это `enp3s0` и будет ли так везде?
+
+`enp3s0` — это **конкретное имя WAN-интерфейса** на данном VPS (видно в `ip -br a` и `ip route show default`).
+
+На других серверах WAN-интерфейс может называться иначе:
+- `eth0`
+- `ens3`, `ens18`
+- `enp1s0` и т.д.
+
+Правильный способ определить WAN-интерфейс:
+
+```bash
+ip route show default
+ip -br a
+```
+
+В утилитах workaround (`apply_egress_direct.sh` / `remove_egress_direct.sh`) это параметр `WAN_IF`.
+По умолчанию он выставлен в `enp3s0`, потому что это наиболее безопасное предположение для текущего окружения, но **на других хостах его нужно переопределять**:
+
+```bash
+WAN_IF=eth0 WAN_GW=<your_gw> sudo bash wireguard/apply_egress_direct.sh
 ```
 
 ---
