@@ -554,8 +554,8 @@ cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
   "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
-      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "proxy"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "proxy"}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
@@ -609,8 +609,8 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
   "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
-      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "proxy"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "proxy"}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
@@ -658,8 +658,8 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
   "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
-      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+      {"tag": "yandex1", "address": "77.88.8.8", "detour": "proxy"},
+      {"tag": "yandex2", "address": "77.88.8.1", "detour": "proxy"}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
