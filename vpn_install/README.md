@@ -69,6 +69,10 @@ sudo bash vpn_install/add_user.sh <username> vpn_install/.env
 - `trusttunnel_client.toml` (TrustTunnel клиент)
 - `trusttunnel_manual.json` (TrustTunnel ручной ввод: address/hostname/username/password/DNS/cert)
 
+### sing-box (клиент)
+- Исходники клиента: https://github.com/sagernet/sing-box
+- Релизы (скачать клиент под разные устройства): https://github.com/SagerNet/sing-box/releases
+
 ## Шаблоны клиентов (vpn_install/clients)
 
 В `vpn_install/clients/` лежат **только актуальные** шаблоны:
