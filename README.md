@@ -120,6 +120,14 @@ sudo via-server2 curl -4 https://ifconfig.me
 - вы понимаете последствия policy routing / nftables
 - нужно увести наружу именно весь egress
 
+### Split-routing mode (планируется)
+Режим, при котором:
+- трафик к российским/внутренним ресурсам продолжает идти напрямую через WAN;
+- трафик к зарубежным ресурсам уводится через `tun0` и `server2`;
+- SSH‑доступ к `server1` явно зафиксирован и не попадает под редиректы.
+
+Подробный план реализации, варианты (ipset+nftables, dnsmasq+domain‑sets, policy routing) и порядок внедрения без потери SSH описаны в разделе 9 `HARDENING_PLAN.md`.
+
 ---
 
 ## Smoke tests
