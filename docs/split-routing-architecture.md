@@ -1,6 +1,6 @@
-# Split-routing для server1: архитектура и спецификация
+# Split-routing для server1: новая архитектура и спецификация (без `safe` и без статических списков подсетей)
 
-## 1. Текущее состояние
+## 1. Текущее состояние и целевая модель
 
 ### 1.1. Общая схема server1 ↔ server2
 
@@ -12,529 +12,389 @@
     - открывает порт Shadowsocks только для ALLOWED_SPROXY;
     - сохраняет правила в `/etc/nftables.conf`.
 
-- **server1** — клиентская сторона (`ss-local` + `tun2socks`), три целевых режима:
-  - **safe** (уже реализован);
-  - **full-tunnel** (уже реализован);
-  - **split** (требуется реализовать).
+- **server1** — клиентская сторона, сейчас поддерживаются два режима:
+  - **full-tunnel** — весь egress-трафик уходит через туннель;
+  - **split-routing** (новый) — российский/"внутренний" трафик идёт напрямую, зарубежный — через туннель.
 
-server1 работает по следующей общей схеме:
+Исторически в репозитории существовал также режим **safe**, основанный на policy routing по UID (`tunroute`) и таблице 100. Этот режим признан избыточным и **полностью удаляется** (см. раздел 7). Вся дальнейшая архитектура и реализация опираются только на **full-tunnel** и **split-routing**.
 
-1. `install_tun2socks_binary.sh` ставит бинарь `tun2socks`.
-2. `install_sslocal.sh` поднимает `ss-local` как клиента к `server2`.
-3. В зависимости от режима:
-   - `install_safe_mode.sh` — только трафик пользователя `tunroute` уходит через `tun0` (таблица 100);
-   - `install_full_tunnel_mode.sh` — весь egress через `tun0`, с аккуратной обработкой ingress и обходами.
+### 1.2. Full-tunnel mode (остаётся без изменений)
 
-### 1.2. Safe mode (реализовано)
+Full-tunnel реализован на связке `ss-local` + `tun2socks` и описан отдельно. Кратко:
 
-Ключевые элементы (`server1/install_safe_mode.sh`):
+- `install_tun2socks_binary.sh` — устанавливает бинарь `tun2socks`.
+- `install_sslocal.sh` — поднимает `ss-local` как клиента к `server2`.
+- `install_full_tunnel_mode.sh`:
+  - поднимает `tun0` (через `tun2socks-post-up-full.sh`),
+  - создаёт таблицу `lip` и правило policy routing для ответов на входящие соединения,
+  - настраивает дефолтный маршрут на `tun0` + исключения (gateway, `server2`, DNS, SSH-пиры, `FULL_TUNNEL_BYPASS_IPS`).
 
-- Создаётся системный пользователь `tunroute`.
-- Поднимается `tun0`:
-  - `ip link set tun0 up mtu <TUN2SOCKS_MTU>`
-  - `ip addr replace <TUN2SOCKS_TUN_ADDR> dev tun0`.
-- Создаётся таблица 100:
-  - `ip route replace default dev tun0 table 100`.
-- Правило policy routing:
-  - `ip rule add priority 1000 uidrange <uid(tunroute)>-<uid(tunroute)> lookup 100`.
-- Обёртка `via-server2`:
-  - запускает команды от пользователя `tunroute`.
+Full-tunnel остаётся основным режимом "всё через туннель" и используется без изменений.
 
-**Итого:**
-- Default route системы не меняется;
-- Только процессы пользователя `tunroute` используют туннель;
-- SSH/системный трафик не трогается.
+## 2. Требования к новому split-routing режиму
 
-### 1.3. Full-tunnel mode (реализовано)
+Новый split-routing режим должен удовлетворять следующим требованиям:
 
-Ключевые элементы (`server1/install_full_tunnel_mode.sh`):
+1. **Автоматический роутинг без статических списков подсетей**
+   - Никаких жёстко зашитых или скачиваемых текстовых файлов с RU-подсетями.
+   - Никаких артефактов вида `ru_nets.txt`, `antizapret.txt` и т.п. в репозитории или установках.
+   - Классификация трафика по странам/регионам должна выполняться средствами самого прокси-движка (GeoIP/GeoSite), без внешнего управления списками IP-сетей.
 
-- Обязательные переменные `.env`: `TUN_SSIP`, `LOCAL_SOCKS_ADDR`, `LOCAL_SOCKS_PORT`, `TUN2SOCKS_IFACE`, `TUN2SOCKS_TUN_DEV`, `TUN2SOCKS_TUN_ADDR`, `TUN2SOCKS_MTU`, `FULL_TUNNEL_BYPASS_IPS`.
-- Поднимается `tun0` аналогично safe mode (через `tun2socks-post-up-full.sh`).
-- Создаётся таблица `lip` (через `/etc/iproute2/rt_tables.d/90-tun2socks.conf`).
-- Скрипт `tun2socks-apply-full-routing.sh`:
-  - Чистит legacy-настройки (старый fwmark/table100, таблица 100, table `lip`, nft table `tun2socks`).
-  - Находит:
-    - дефолтный gateway `gw` через uplink-интерфейс (`TUN2SOCKS_IFACE`);
-    - публичный IP `server_ip` на uplink-интерфейсе;
-    - upstream DNS (не 127.x.x.x) и активные SSH-пиры.
-  - Настраивает **uplink-исключения** через `gw`:
-    - маршрут к `gw/32`;
-    - маршрут к `TUN_SSIP/32` (адрес `server2`);
-    - маршрут к `169.254.169.0/24`;
-    - по одному маршруту `/32` к каждому обнаруженному DNS-серверу;
-    - по одному маршруту `/32` к каждому активному SSH-пиру;
-    - маршруты из `FULL_TUNNEL_BYPASS_IPS` (список IP/подсетей).
-  - Настраивает таблицу `lip`:
-    - `ip route replace default via <gw> dev <uplink> table lip`;
-    - `ip rule add priority 32765 from <server_ip>/32 lookup lip`
-      — ответы на входящие соединения уходят через uplink, а не в туннель.
-  - Основная модель маршрутизации:
-    - `ip route replace default dev tun0 metric 50`;
-    - `ip route replace default via gw dev uplink metric 200`.
-- systemd-юниты:
-  - `tun2socks-server2.service` — запускает `tun2socks` с `-device tun://tun0` и `-tun-post-up`;
-  - `tun2socks-full-routing.service` — one-shot, выполняет `tun2socks-apply-full-routing.sh`, RemainAfterExit.
+2. **Split-поведение**
+   - Трафик к российским / "внутренним" ресурсам (по GeoIP/GeoSite) идёт **напрямую** через uplink-интерфейс `server1`.
+   - Остальной трафик (FOREIGN) уходит через туннель `server2`.
 
-**Итого:**
-- Для всего исходящего трафика default route — через `tun0`.
-- Для ответов на входящие подключения (по публичному IP `server1`) используется отдельная таблица `lip`, чтобы сохранить корректный обратный путь.
-- Критичные IP (gateway, `server2`, DNS, активные SSH-пиры, доп. bypass IP) всегда идут напрямую через uplink.
+3. **Zero-config для пользователя**
+   - Пользователь на `server1` не должен вручную собирать/обновлять списки подсетей.
+   - Включение split-режима должно происходить одной командой, аналогично `full`:
 
-## 2. Цель split-routing режима
+     ```bash
+     sudo bash ./server1/setup.sh split server1/.env
+     ```
 
-**Задача:** добавить **третий режим**:
+   - Все правила маршрутизации и классификации трафика настраиваются автоматически.
 
-- российский/внутренний трафик (`RU`) — **напрямую** через uplink-интерфейс `server1` (WAN);
-- зарубежный трафик (`FOREIGN`) — через туннель `tun0` → `server2`;
-- SSH-доступ к `server1` **никогда** не должен оказаться в туннеле;
-- поведение safe/full режимов не ломается.
+4. **Безопасность и предсказуемость**
+   - SSH-доступ к `server1` **никогда** не должен оказаться в туннеле.
+   - Поведение full-tunnel не ломается; режимы взаимоисключающие (одновременно активен либо full, либо split).
 
-Режим должен:
+5. **Минимум новых зависимостей и простота внедрения**
+   - Решение должно хорошо вписываться в текущий bash + systemd + `ss-local` стек.
+   - Предпочтительна единая бинарь/служба, которая решает сразу задачи туннелирования **и** split-роутинга.
 
-- включаться одной командой, аналогично уже существующим:
-  - `sudo bash ./server1/setup.sh split server1/.env`;
-- иметь простые smoke-тесты;
-- иметь понятный rollback (отключение split без разрушения safe/full).
+## 3. Анализ вариантов реализации split-routing без статических списков
 
-## 3. Выбранный подход для первой реализации
+Рассматривались три основных варианта:
 
-Для первой итерации split-routing выбираем **вариант A** из раздела 9 HARDENING_PLAN:
+1. **BGP-маршрутизация (Bird2/FRR)**
+2. **DNS-based роутинг (dnsmasq + ipset)**
+3. **Замена `tun2socks` на Xray/Sing-box с встроенным GeoIP/GeoSite-роутингом**
 
-> ipset + nftables + policy routing по IP-сетям, **без** дополнительных зависимостей (dnsmasq/BGP и т.д.).
+### 3.1. BGP (Bird2/FRR)
 
-Мотивация:
+Идея:
 
-- минимальные новые зависимости (нужен только `nftables` и `ipset`, которые уже используются на server2 и планируются для hardening); 
-- вся логика — в bash + `nft` + `ip` (хорошо вписывается в текущий стиль репозитория);
-- можно использовать готовые списки RU-подсетей (antizapret, bgp.he.net, `ipgeo`-списки) как **внешние артефакты**, подгружаемые в ipset;
-- проще контролировать и отлаживать без изменения DNS-пути.
+- Поднять на `server1` BGP-демон (Bird2/FRR), принимать полную BGP-таблицу или специализированный фид (только RU-префиксы) от провайдера/маршрутизатора, и на основании BGP-комьюнити/префиксов строить policy routing (RU → uplink, остальное → туннель).
 
-## 4. Высокоуровневая архитектура split-routing
+Плюсы:
+
+- Максимально точное соответствие маршрутизации реальной сети.
+- Можно гибко управлять правилами на уровне BGP-комьюнити, AS-путей и т.п.
+
+Минусы:
+
+- Существенное усложнение инсталляции: нужен внешний BGP-пир, настройка сессий, фильтров и т.д.
+- Провайдеры редко дают BGP-пиринг для обычных VPS/хостингов; требует более сложной инфраструктуры.
+- Не отвечает требованию zero-config для типичного пользователя `server1`.
+
+**Вывод:** BGP-подход архитектурно интересен, но **выходит за рамки целевой простоты** и требует отдельной инфраструктуры. Для данного проекта отклоняется.
+
+### 3.2. DNS-based роутинг (dnsmasq + ipset)
+
+Идея:
+
+- Поднять локальный DNS (dnsmasq/unbound), который по результатам резолва доменов добавляет IP-адреса в `ipset`-ы (RU vs FOREIGN), а далее iptables/nftables помечают трафик по этим ipset-ам и направляют его либо через uplink, либо через туннель.
+
+Плюсы:
+
+- Хорошо работает для доменных/HTTP(S) запросов.
+- Не требует BGP или внешних маршрутизаторов.
+
+Минусы:
+
+- Всё равно нужен источник знаний "какие домены считать российскими" — то есть, **по факту** появляются статические списки доменов, пусть и не подсетей.
+- Не покрывает трафик, идущий **по IP без DNS** (raw IP, P2P, некоторые API-клиенты).
+- Сложнее отлаживать и объяснять пользователю, почему конкретный IP попал в тот или иной ipset.
+
+**Вывод:** DNS-based роутинг избегает статических списков подсетей, но подменяет их списками доменов и даёт неполное покрытие. Для zero-config и предсказуемости лучше использовать движок, где доменные и IP-свойства уже встроены и поддерживаются разработчиками.
+
+### 3.3. Xray / Sing-box с встроенным GeoIP/GeoSite
+
+Идея:
+
+- Заменить связку `tun2socks` + самописный split-routing на современный прокси-движок (Xray или Sing-box), который:
+  - умеет работать как клиент Shadowsocks/VLESS/etc;
+  - поднимает TUN-интерфейс (`tun0`) и принимает на него весь/частичный трафик хоста;
+  - имеет встроенные GeoIP/GeoSite-базы (обычно в `.dat`/`.mmdb` формате), позволяющие писать правила вида "домен/адрес в `geoip:ru` → direct, всё остальное → proxy".
+
+Плюсы:
+
+- **Настоящий zero-config для подсетей:** не нужно хранить, скачивать или обновлять IP- или доменные списки вручную — они идут вместе с бинарём и/или обновляются централизованно.
+- Богатый язык правил: можно комбинировать geoip, geosite, порты, протоколы, процессы.
+- Поддержка сразу туннельного режима и split-routing в одной конфигурации.
+- Упрощается bash-логика: большую часть работы выполняет конфиг Xray/Sing-box.
+
+Минусы:
+
+- Появляется новая бинарь и свой формат конфигурации (`config.json` / `config.sjson` и т.п.).
+- Переход с `tun2socks` на Xray/Sing-box требует аккуратной миграции юнитов systemd и части скриптов.
+
+**Вывод:** с учётом новых требований (никаких статических списков подсетей, простой zero-config-режим), **наиболее оптимальным вариантом является замена `tun2socks` на Sing-box (или Xray) с использованием встроенного GeoIP/GeoSite-роутинга**.
+
+В дальнейшем документ будет формулировать архитектуру именно для варианта "**Sing-box как универсальный TUN-прокси с GeoIP-роутингом**". При желании реализацию можно адаптировать под Xray с аналогичными принципами.
+
+## 4. Новая архитектура split-routing на базе Sing-box
 
 ### 4.1. Сетевые сущности
 
 - **Интерфейсы:**
-  - `uplink` (по умолчанию берём из `ip route show default`, как в full-tunnel) — физический WAN-интерфейс `server1` (например, `eth0`);
-  - `tun0` — виртуальный интерфейс `tun2socks` (уже используется в safe/full).
+  - `uplink` — физический WAN-интерфейс `server1` (определяется по default route, как и сейчас в full-tunnel);
+  - `tun0` — TUN-интерфейс, поднимаемый самим Sing-box (вместо отдельного `tun2socks`).
 
-- **Таблицы маршрутизации:**
-  - `main` — стандартная системная таблица; здесь остаётся direct default route через uplink;
-  - `tun` — **новая** таблица, в которой default route указывает на `tun0`;
-  - `lip` — как и в full-tunnel, может использоваться для ingress (по необходимости, см. ниже).
+- **Маршрутизация:**
+  - Для **full-tunnel** сохраняется существующая модель: default route системы указывает на `tun0`, а исключения (gateway, `server2`, DNS, SSH-пиры, ingress-трафик) идут через uplink.
+  - Для **split-routing**:
+    - по-прежнему поднимается `tun0` (но уже Sing-box);
+    - базовый default route может указывать на `tun0` (как в full),
+    - однако **распределение трафика FOREIGN/RU происходит уже внутри Sing-box** по GeoIP/GeoSite:
+      - `route:geoip:ru` → outbound `direct` (через uplink);
+      - всё остальное → outbound `shadowsocks-out` → `server2`.
 
-- **Маркировка трафика:**
-  - `fwmark SPLIT_MARK` (например, `0x65` или отдельное значение из `.env`),
-  - `ip rule add fwmark SPLIT_MARK lookup tun` — отправляет помеченный трафик в таблицу `tun`;
-  - непомеченный трафик остаётся в таблице `main` (uplink).
+> Ключевой момент: split-логика переезжает **из bash/nftables в конфиг Sing-box**. Bash-скрипты отвечают за:
+> - установку бинаря Sing-box;
+> - генерацию/обновление `sing-box.json` по шаблону;
+> - поднятие systemd-юнитов;
+> - переключение режимов (full/split) через разные section/параметры в конфиге.
 
-### 4.2. nftables/ipset слой
+### 4.2. Конфигурация Sing-box (высокоуровневый шаблон)
 
-Новая таблица `inet sc_split` (название можно вынести в `.env`, но на первом шаге жёстко задать):
+Условный шаблон `server1/sing-box-config.json` (точный синтаксис и ключи — зона ответственности devops):
 
-- **sets**:
-  - `set RU_NETS` — список российских/внутренних подсетей, которые **идут напрямую (WAN)**;
-  - `set DIRECT_NETS` — дополнительные IP/подсети, которые нужно **жёстко держать на WAN** (управляющие IP, SSH-пиры, DNS, `server2`, gateway и т.п.);
-- **chain**:
-  - `chain mark_for_tun { type route hook output priority mangle; policy accept; }`
-
-Логика в chain `mark_for_tun` (упрощённо):
-
-```nft
-# 1) Никогда не трогаем SSH к server1
-ip daddr $SERVER1_PUBLIC_IP tcp dport 22 return
-
-# 2) Никогда не трогаем трафик к DIRECT_NETS
-ip daddr @DIRECT_NETS return
-
-# 3) Трафик к RU_NETS — остаётся на WAN (ничего не делаем)
-ip daddr @RU_NETS return
-
-# 4) Всё остальное — помечаем для туннеля
-meta mark set $SPLIT_MARK
+```jsonc
+{
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": "10.0.0.1/24",
+      "mtu": 9000,
+      "auto_route": true,
+      "strict_route": true
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "shadowsocks",
+      "tag": "proxy",
+      "server": "${TUN_SSIP}",
+      "server_port": ${SS_SERVER_PORT},
+      "method": "${SS_METHOD}",
+      "password": "${SS_PASSWORD}"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "geoip": {
+      "path": "/etc/sing-box/geoip.db"
+    },
+    "geosite": {
+      "path": "/etc/sing-box/geosite.db"
+    },
+    "rules": [
+      // Split-rule для России
+      {
+        "geoip": ["ru"],
+        "outbound": "direct"
+      },
+      // (опционально) дополнительные локальные/внутренние диапазоны
+      {
+        "ip_cidr": ["10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"],
+        "outbound": "direct"
+      },
+      // Всё остальное — в туннель
+      {
+        "outbound": "proxy"
+      }
+    ]
+  }
+}
 ```
 
-Где значения:
+Особенности:
 
-- `$SERVER1_PUBLIC_IP` — как в full-tunnel: IPv4 сервера на uplink-интерфейсе;
-- `$SPLIT_MARK` — константа (например, `0x65`) или параметр из `.env`.
+- Sing-box самостоятельно формирует маршрутизацию на основе `inbounds[type=tun].auto_route=true`.
+- Встроенные базы `geoip.db` / `geosite.db` используются для определения стран/категорий.
+- Фактически мы получаем split-роутинг **без каких-либо наших файлов со списками подсетей**.
 
-### 4.3. Policy routing
+### 4.3. Режимы full vs split на уровне Sing-box
 
-В `install_split_mode.sh` (новый скрипт) выполняются шаги:
+Подход к переключению режимов:
 
-1. Определить uplink-интерфейс и `SERVER1_PUBLIC_IP` (по аналогии с full-tunnel).
-2. Убедиться, что `tun0` уже поднят и доступен (tun2socks/ss-local установлены и запущены).
-3. Создать таблицу `tun` в `/etc/iproute2/rt_tables.d/` (например, `201 tun`):
+- Оставить **один systemd-юнит**, например `sing-box-server2.service`, но с параметром режима через `.env` или отдельные конфиги.
+- В `server1/.env` добавить переменную, определяющую режим:
 
-```bash
-echo '201 tun' >/etc/iproute2/rt_tables.d/91-tun-split.conf
-```
+  ```dotenv
+  TUN_MODE="full"   # допустимые значения: "full" или "split"
+  ```
 
-4. В таблицу `tun` добавить default route через `tun0`:
+- Скрипт `server1/setup.sh` будет генерировать финальный `sing-box.json`:
+  - для `MODE=full` — все правила route направляют трафик через `proxy` (shadowsocks), кроме минимального набора `direct`-исключений (gateway, DNS, SSH-пиры и т.п.);
+  - для `MODE=split` — включается правило `geoip:ru → direct`, как описано выше.
 
-```bash
-ip route replace default dev tun0 table tun
-```
+Таким образом, различия между full и split заключаются только в содержимом секции `route.rules` и, возможно, доп. env-переменных. Никаких отдельных файлов `ru_nets.txt` не требуется.
 
-5. Добавить правило policy routing для `fwmark SPLIT_MARK`:
+### 4.4. SSH и критичные исключения
 
-```bash
-ip rule add priority 1100 fwmark ${SPLIT_FWMARK} lookup tun
-```
+Чтобы гарантировать, что SSH к `server1` не оказывается в туннеле, используются два уровня защиты:
 
-6. Убедиться, что в таблице `main` сохранён direct default route через uplink (если ранее включался full-tunnel, необходимо очистить его влияние, либо не комбинировать режимы одновременно).
+1. **На уровне Sing-box:**
+   - В секции `route.rules` добавляется правило:
 
-**Важно:** split-mode **не должен** сам превращать весь трафик в full-tunnel. Он только добавляет `ip rule fwmark → tun` + nft-маркировку.
+     ```jsonc
+     {
+       "ip_cidr": ["${SERVER1_PUBLIC_IP}/32"],
+       "port": [22],
+       "outbound": "direct"
+     }
+     ```
 
-## 5. Модель совместимости режимов
+2. **На уровне системной маршрутизации (как сейчас в full-tunnel):**
+   - `install_full_tunnel_mode.sh` (и его эквивалент для Sing-box) добавляет в таблицу `lip` и/или `main` явные маршруты для активных SSH-пиров и самого сервера, чтобы ответы шли через uplink.
 
-- Safe / full / split — **логические режимы** одной и той же связки `tun2socks + ss-local`.
-- Для простоты первой итерации:
-  - считаем, что одновременно активен только **один режим** (safe, full или split);
-  - `setup.sh split`:
-    - устанавливает/обновляет `tun2socks` и `ss-local` (как уже делается для safe/full);
-    - приводит систему к целевому состоянию split (при необходимости — очищает следы full-tunnel: default route через tun0, таблицу `lip`, старые `ip rule` для full).
-- Откат split не должен ломать safe/full:
-  - отдельный скрипт отката не обязателен на первом шаге, но как минимум:
-    - `install_split_mode.sh` должен быть идемпотентным и уметь безопасно переустановить split;
-    - для полного отката достаточно:
-      - удалить `ip rule fwmark ... lookup tun`;
-      - сбросить/отключить цепочку `sc_split mark_for_tun` (или убрать jump из точки подключения);
-      - удалить/очистить таблицу `tun`.
+В результате даже при ошибке в настройке Sing-box SSH-трафик остаётся доступным за счёт policy routing.
 
-## 6. Конфигурационные параметры split-mode
+## 5. Обновлённая модель совместимости режимов
 
-Новые поля в `server1/.env` (предложение):
+- **safe mode** — полностью убирается из кода и документации.
+- Поддерживаются только два режима:
+  - `full` — весь исходящий трафик (за исключением явных bypass-правил) идёт через туннель.
+  - `split` — трафик классифицируется Sing-box по GeoIP/GeoSite:
+    - `geoip:ru` + локальные диапазоны → `direct` (uplink);
+    - всё остальное → `proxy` (туннель).
+
+Допущение первой итерации:
+
+- Одновременно активен только один режим (full **или** split).
+- `server1/setup.sh` приводит систему к целевому состоянию выбранного режима (в т.ч. очищает конфигурацию другого режима, если он был включён ранее).
+
+## 6. Минимальные перемены в конфигурации и env
+
+Предлагаемые новые/изменённые параметры в `server1/.env`:
 
 ```dotenv
-# Включение режима split (опционально, для читабельности)
-SPLIT_MODE_ENABLED="1"
+# Режим туннелирования: full или split
+TUN_MODE="full"  # по умолчанию full, можно переключить на split
 
-# fwmark для отправки трафика в таблицу tun
-SPLIT_FWMARK="0x65"  # любое значение, не конфликтующее с другими правилами
+# Путь к конфигу Sing-box (заполняется/используется скриптами)
+SINGBOX_CONFIG_PATH="/etc/sing-box/config.json"
 
-# Путь к файлам с подсетями для RU и DIRECT
-SPLIT_RU_NETS_FILE="/etc/server1-split/ru_nets.txt"
-SPLIT_DIRECT_NETS_FILE="/etc/server1-split/direct_nets.txt"
-
-# (опционально) Явный uplink-интерфейс, если автоопределение нежелательно
-SPLIT_UPLINK_IFACE=""
+# (остальные переменные: TUN_SSIP, SS_SERVER_PORT, SS_METHOD, SS_PASSWORD и т.д. — как сейчас для ss-local)
 ```
 
-Формат файлов подсетей (пример):
-
-```text
-# ru_nets.txt
-5.45.192.0/18
-31.173.64.0/18
-...
-
-# direct_nets.txt
-# Управляющие IP-адреса, которыми нельзя рисковать
-203.0.113.10/32
-198.51.100.0/24
-# DNS-серверы, провайдеры мониторинга и т.п.
-8.8.8.8/32
-1.1.1.1/32
-```
-
-Ответственность за наполнение файлов лежит на операторе/плейбуке Ansible/отдельных скриптах; ServerConfiguration только **подхватывает** эти файлы и загружает в ipset.
-
-## 7. Поведение и шаги скрипта install_split_mode.sh (спецификация для devops)
-
-Новый файл: `server1/install_split_mode.sh`.
-
-### 7.1. Общий каркас
-
-- Shebang и опции:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-```
-
-- Параметр ENV_FILE по аналогии с существующими:
-
-```bash
-ENV_FILE="${1:-server1/.env}"
-```
-
-- Вспомогательные функции:
-  - `log()` — как в других скриптах;
-  - `require_root()` — проверка EUID;
-  - `load_env()` — загрузка `.env` и проверка необходимых переменных (см. раздел 6);
-  - `detect_uplink_and_ip()` — определение uplink-интерфейса и публичного IP.
-
-### 7.2. Проверки и зависимости
-
-- Проверить наличие:
-  - `tun2socks`;
-  - `ss-local`;
-  - `ip`, `nft`, `ipset`.
-- При необходимости установить `nftables`/`ipset` через `apt-get` (аналогично full-tunnel):
-
-```bash
-apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get install -y nftables ipset
-```
-
-### 7.3. Поднятие tun0 (если ещё не поднят)
-
-- Либо переиспользовать уже существующую логику `tun2socks-post-up-*` и systemd-юнит `tun2socks-server2.service`;
-- Либо явно проверить, что `ip -br addr show tun0` показывает `UP`.
-
-**Рекомендуемая стратегия:** split-mode не изобретает свой tun2socks, а **перепользует** существующий сервис `tun2socks-server2.service` (как safe/full). То есть:
-
-1. Убедиться, что `tun2socks-server2.service` установлен и включён (через `install_tun2socks_binary.sh` и `install_sslocal.sh`).
-2. Если не включён — включить `systemctl enable --now tun2socks-server2.service`.
-
-### 7.4. Настройка таблицы tun и ip rule
-
-1. Создать запись в `/etc/iproute2/rt_tables.d/`:
-
-```bash
-install -d -m 0755 /etc/iproute2/rt_tables.d
-echo '201 tun' >/etc/iproute2/rt_tables.d/91-tun-split.conf
-```
-
-2. Убедиться, что в таблице `tun` есть default route через tun0:
-
-```bash
-ip route replace default dev tun0 table tun
-```
-
-3. Добавить (идемпотентно) `ip rule` для `SPLIT_FWMARK`:
-
-```bash
-ip rule del fwmark ${SPLIT_FWMARK} lookup tun 2>/dev/null || true
-ip rule add priority 1100 fwmark ${SPLIT_FWMARK} lookup tun
-```
-
-### 7.5. Создание/загрузка ipset-ов
-
-1. Создать ipset-ы (с фиксированными именами):
-
-```bash
-ipset create SC_RU_NETS hash:net -exist
-ipset create SC_DIRECT_NETS hash:net -exist
-```
-
-2. Очистить их перед загрузкой (чтобы переустановка не приводила к "слоению"):
-
-```bash
-ipset flush SC_RU_NETS
-ipset flush SC_DIRECT_NETS
-```
-
-3. Если указаны файлы `SPLIT_RU_NETS_FILE`/`SPLIT_DIRECT_NETS_FILE` и они существуют — загрузить содержимое:
-
-```bash
-if [[ -f "$SPLIT_RU_NETS_FILE" ]]; then
-  while read -r net; do
-    net="${net%%#*}"  # отбросить комментарий
-    net="${net// /}"   # убрать пробелы
-    [[ -n "$net" ]] || continue
-    ipset add SC_RU_NETS "$net" -exist
-  done <"$SPLIT_RU_NETS_FILE"
-fi
-
-if [[ -f "$SPLIT_DIRECT_NETS_FILE" ]]; then
-  while read -r net; do
-    net="${net%%#*}"
-    net="${net// /}"
-    [[ -n "$net" ]] || continue
-    ipset add SC_DIRECT_NETS "$net" -exist
-  done <"$SPLIT_DIRECT_NETS_FILE"
-fi
-```
-
-### 7.6. Конфигурация nftables (таблица inet sc_split)
-
-1. Создать таблицу и chains, если их ещё нет. Примерный шаблон:
-
-```bash
-nft list table inet sc_split >/dev/null 2>&1 || nft add table inet sc_split
-
-nft list chain inet sc_split mark_for_tun >/dev/null 2>&1 || nft add chain inet sc_split mark_for_tun '{ type route hook output priority mangle; policy accept; }'
-
-nft add set inet sc_split RU_NETS '{ type ipv4_addr; flags interval; auto-merge; }' >/dev/null 2>&1 || true
-nft add set inet sc_split DIRECT_NETS '{ type ipv4_addr; flags interval; auto-merge; }' >/dev/null 2>&1 || true
-```
-
-2. Привязать ipset-ы к nft-sets (или использовать напрямую ipset через `ip daddr @ipsetname` — зависит от выбранного стиля; для простоты допускается прямое использование системных ipset без дублирования в nft).
-
-3. Записать правила chain `mark_for_tun` (предварительно очистив старые):
-
-```bash
-nft flush chain inet sc_split mark_for_tun
-
-# SSH к самому server1 (по его публичному IP) не трогаем
-nft add rule inet sc_split mark_for_tun ip daddr ${SERVER1_PUBLIC_IP} tcp dport 22 return
-
-# DIRECT_NETS всегда через WAN
-nft add rule inet sc_split mark_for_tun ip daddr @SC_DIRECT_NETS return
-
-# RU_NETS всегда через WAN
-nft add rule inet sc_split mark_for_tun ip daddr @SC_RU_NETS return
-
-# Всё остальное — в туннель
-nft add rule inet sc_split mark_for_tun meta mark set ${SPLIT_FWMARK}
-```
-
-> Важно: в окончательной реализации нужно синхронизировать имена sets между ipset и nft. Один из вариантов — использовать только ipset, а в правилах `nft` писать `ip daddr @SC_RU_NETS`, где `SC_RU_NETS` — **ipset** (через `type ipv4_addr; flags interval;` и `map` к ipset). Конкретный синтаксис devops подберёт при реализации и тесте.
-
-### 7.7. Включение/отключение split-набора правил
-
-Для безопасного отката и включения/выключения split-режима предлагается:
-
-- **Не** врезаться в существующие таблицы `inet filter`/`nat` и т.п.;
-- Использовать **route hook output** только в `inet sc_split` — этого достаточно для управления исходящим трафиком с хоста.
-
-На первом шаге достаточно, что наличие цепочки `mark_for_tun` + `ip rule fwmark` уже реализует split-mode. Выключить режим можно простыми командами (описать в README):
-
-```bash
-# Отключить split-mode (ручной откат)
-sudo ip rule del fwmark ${SPLIT_FWMARK} lookup tun || true
-sudo nft flush chain inet sc_split mark_for_tun || true
-```
-
-## 8. Изменения по файлам (ToDo для devops)
-
-### 8.1. Новый скрипт `server1/install_split_mode.sh`
-
-Реализовать по спецификации раздела 7. Основные требования:
-
-- `set -euo pipefail`;
-- Идемпотентность: повторный запуск не ломает конфигурацию и не дублирует правила;
-- Логирование основных шагов через `log "..."`;
-- Явная проверка env-переменных и зависимостей с понятными ошибками.
-
-### 8.2. Обновление `server1/setup.sh`
-
-- Добавить третий режим:
-
-```bash
-Usage:
-  bash ./server1/setup.sh safe [server1/.env]
-  bash ./server1/setup.sh full [server1/.env]
-  bash ./server1/setup.sh split [server1/.env]
-```
-
-- Валидация `MODE` должна включать `split`:
-
-```bash
-case "$MODE" in
-  safe|full|split) ;;
-  * ) usage; exit 1;;
-esac
-```
-
-- Добавить ветку `split`:
-
-```bash
-case "$MODE" in
-  safe)
-    bash "$SCRIPT_DIR/install_safe_mode.sh" "$ENV_FILE"
-    ;;
-  full)
-    bash "$SCRIPT_DIR/install_full_tunnel_mode.sh" "$ENV_FILE"
-    ;;
-  split)
-    bash "$SCRIPT_DIR/install_split_mode.sh" "$ENV_FILE"
-    ;;
-esac
-```
-
-### 8.3. Обновление `server1/README.md`
-
-Добавить раздел "Split mode" с описанием:
-
-- Назначение режима (RU → WAN, foreign → tun0);
-- Требования:
-  - наличие и корректность `server1/.env`;
-  - подготовленные файлы подсетей (опционально, с примерами);
-- Команды применения:
-
-```bash
-sudo bash ./server1/setup.sh split server1/.env
-```
-
-- Smoke-тесты (из HARDENING_PLAN 9.6, адаптировать под split):
-  - curl к российскому ресурсу (ожидаем WAN);
-  - curl к зарубежному (`ifconfig.me`, ожидаем IP `server2`);
-  - ssh-тест (подтвердить, что не пропал доступ).
-
-### 8.4. Обновление корневого `README.md`
-
-- Добавить упоминание нового режима split наряду с safe/full;
-- Краткая ссылка на `docs/split-routing-architecture.md` и раздел 9 `HARDENING_PLAN.md`.
-
-### 8.5. Скрипт установки окружения (если есть общий `setup.sh` в корне)
-
-- При необходимости — добавить туда упоминание split-режима и проверку наличия `nftables`/`ipset`.
-
-## 9. Минимальные smoke-тесты для split-mode
-
-Примеры команд (ожидается, что devops добавит аккуратный чек-лист в README):
-
-1. **Проверка базовой связности и SSH**
-
-```bash
-# С управляющего хоста
-ssh user@server1 'echo OK && ip route get 1.1.1.1'
-```
-
-Ожидаем:
-- SSH стабилен;
-- маршрут до 1.1.1.1 после включения split использует таблицу `tun` (по `ip route get` должно быть видно `dev tun0` или `table tun`, в зависимости от реализации).
-
-2. **Российский ресурс через WAN**
-
-```bash
-ssh user@server1 'curl -4 -s https://ya.ru -o /dev/null -w "%{remote_ip} %{http_code}\\n"'
-```
-
-- Проверить по трассировке (`mtr/traceroute`), что маршрут идёт через uplink;
-- По логам `nft` убедиться, что правило маркировки не срабатывает (нет `SPLIT_FWMARK`).
-
-3. **Зарубежный ресурс через туннель**
-
-```bash
-ssh user@server1 'curl -4 -s https://ifconfig.me -o /dev/null -w "%{remote_ip} %{http_code}\\n"'
-```
-
-- Внешний IP должен соответствовать `server2`/провайдеру туннеля;
-- `ip route get <remote_ip>` должен демонстрировать использование `table tun` / `dev tun0`.
-
-4. **Диагностика ipset/nftables**
-
-```bash
-ssh user@server1 '
-  sudo ipset list SC_RU_NETS || true
-  sudo ipset list SC_DIRECT_NETS || true
-  sudo nft list table inet sc_split || true
-'
-```
-
-5. **Отключение split (ручной rollback)**
-
-```bash
-ssh user@server1 '
-  sudo ip rule del fwmark ${SPLIT_FWMARK} lookup tun || true
-  sudo nft flush chain inet sc_split mark_for_tun || true
-  ip route get 1.1.1.1
-'
-```
-
-Ожидаем:
-- весь трафик снова идёт через WAN;
-- SSH не теряется.
+Скрипты генерации конфига Sing-box берут значения из `.env` и на их основе рендерят итоговый JSON.
+
+## 7. Удаление `safe` режима (ToDo для devops)
+
+Ниже перечислены шаги, которые должен выполнить devops при реализации новой архитектуры:
+
+1. **Удалить скрипты и логику safe-режима**
+   - Удалить файл `server1/install_safe_mode.sh`.
+   - Удалить из `server1/setup.sh` все упоминания режима `safe`:
+     - из `Usage`;
+     - из `case "$MODE" in ...)`;
+     - любые дополнительные проверки/ветки.
+   - Удалить любые вспомогательные файлы/юниты, относящиеся только к safe (если есть).
+
+2. **Удалить упоминания safe-режима из документации**
+   - Корневой `README.md`:
+     - убрать описание safe-режима;
+     - обновить список поддерживаемых режимов до `full` и `split`.
+   - `server1/README.md`:
+     - удалить или переписать разделы, описывающие safe;
+     - скорректировать примеры команд, чтобы остались только `full` и `split`.
+   - В других документах (включая этот) не должно оставаться ссылок на safe.
+
+3. **Удалить любые env-переменные, специфичные для safe**
+   - Проверить `server1/.env.example` / шаблоны:
+     - удалить переменные, относящиеся только к safe.
+
+4. **Почистить install/upgrade-скрипты**
+   - Если есть общий `setup.sh` в корне или вспомогательные скрипты, убедиться, что они не ссылаются на safe.
+
+## 8. Реализация split-routing на Sing-box (ToDo для devops)
+
+1. **Добавить установку Sing-box**
+   - Новый скрипт, например: `server1/install_singbox.sh`:
+     - скачивает и устанавливает бинарь Sing-box подходящей версии;
+     - создаёт директорию `/etc/sing-box/`;
+     - кладёт туда базовый шаблон `config.json` или устанавливает его через другой скрипт.
+
+2. **Добавить генерацию конфига Sing-box**
+   - Новый скрипт, например: `server1/render_singbox_config.sh`:
+     - читает `server1/.env`;
+     - в зависимости от `TUN_MODE` генерирует `config.json` с нужным набором правил в секции `route.rules`;
+     - не использует никаких локальных файлов со списками подсетей.
+
+3. **Обновить `server1/setup.sh`**
+   - Вместо `tun2socks`/`ss-local` вызывать установку и запуск Sing-box:
+
+     ```bash
+     case "$MODE" in
+       full)
+         bash "$SCRIPT_DIR/install_singbox.sh" "$ENV_FILE"
+         TUN_MODE="full" bash "$SCRIPT_DIR/render_singbox_config.sh" "$ENV_FILE"
+         systemctl enable --now sing-box-server2.service
+         ;;
+       split)
+         bash "$SCRIPT_DIR/install_singbox.sh" "$ENV_FILE"
+         TUN_MODE="split" bash "$SCRIPT_DIR/render_singbox_config.sh" "$ENV_FILE"
+         systemctl enable --now sing-box-server2.service
+         ;;
+     esac
+     ```
+
+   - Обеспечить идемпотентность: повторный запуск обновляет конфиг и перезапускает сервис без дублирования правил.
+
+4. **Обновить systemd-юниты**
+   - Добавить новый юнит `sing-box-server2.service`, который запускает Sing-box с нужным конфигом.
+   - При необходимости сохранить/переиспользовать часть логики существующих юнитов `tun2socks-*` до полного перехода.
+
+5. **Обновить `server1/README.md` и корневой `README.md`**
+   - Описать новый split-режим:
+     - коротко объяснить, что трафик к `geoip:ru` идёт напрямую, остальной через туннель;
+     - подчеркнуть, что пользователю не нужно управлять списками подсетей.
+   - Привести примеры команд включения/отката.
+
+6. **Минимальные smoke-тесты (обновлённые)**
+
+   - Проверка SSH и общей связности:
+
+     ```bash
+     ssh user@server1 'echo OK && ip route get 1.1.1.1'
+     ```
+
+   - Российский ресурс через uplink (в split-режиме):
+
+     ```bash
+     ssh user@server1 'curl -4 -s https://ya.ru -o /dev/null -w "%{remote_ip} %{http_code}\\n"'
+     ```
+
+     - По трассировке `mtr/traceroute` ожидать маршрут через uplink.
+
+   - Зарубежный ресурс через туннель:
+
+     ```bash
+     ssh user@server1 'curl -4 -s https://ifconfig.me -o /dev/null -w "%{remote_ip} %{http_code}\\n"'
+     ```
+
+     - Внешний IP должен соответствовать `server2`/провайдеру туннеля.
+
+   - Диагностика Sing-box:
+
+     ```bash
+     ssh user@server1 '
+       sudo systemctl status sing-box-server2.service || true
+       sudo journalctl -u sing-box-server2.service -n 50 --no-pager || true
+     '
+     ```
 
 ---
 
-Этот документ фиксирует архитектуру и минимальную спецификацию split-routing режима для `server1`. Следующий шаг — реализация по этому плану в новой ветке (`devops`-агентом) с добавлением:
+Этот документ фиксирует обновлённую архитектуру split-routing режима для `server1`:
 
-- `server1/install_split_mode.sh`;
-- обновлений `server1/setup.sh`, `server1/README.md`, корневого `README.md`;
-- smoke-тестов и краткой инструкции по откату.
+- **safe-режим удалён**,
+- split-роутинг реализуется через **Sing-box с GeoIP/GeoSite**, без статических списков подсетей,
+- devops должен обновить реализацию в ветке `feature/split-routing` и сопутствующую документацию/юниты в соответствии с разделами 7–8.
