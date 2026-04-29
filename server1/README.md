@@ -4,13 +4,9 @@
 
 - **safe mode** — безопасный режим, только для пользователя `tunroute`
 - **full-tunnel mode** — весь исходящий трафик сервера через `tun2socks`
+- **split-routing mode** — зарубежный трафик через туннель, российский напрямую.
 
-Также планируется отдельный режим **split-routing**:
-- российские/внутренние сервисы идут напрямую через WAN;
-- зарубежные сервисы выводятся через `tun0` и `server2`;
-- SSH‑доступ к `server1` фиксируется и не попадает под случайный редирект.
-
-Детальный план реализации split‑режима см. в разделе 9 `HARDENING_PLAN.md`.
+Детальный план реализации см. в `docs/split-routing-architecture.md` и разделе 9 `HARDENING_PLAN.md`.
 
 ## 0. Инициализация сервера
 
@@ -109,6 +105,32 @@ sudo bash ./server1/check_via_server2.sh server1/.env full
   - активные SSH peer IPs (чтобы не рвать текущие SSH-сессии)
   - дополнительные IP/подсети из `FULL_TUNNEL_BYPASS_IPS`
 - тем самым позволяет `server1` быть входной точкой для обычных клиентов/сервисов, но выпускать их egress через `server2`
+
+---
+
+### Split-routing mode
+
+Применение:
+
+```bash
+sudo bash ./server1/setup.sh split server1/.env
+```
+
+### Что делает split-routing mode
+- поднимает `tun0` через `ss-local`
+- создаёт ipset-ы `SC_RU_NETS` и `SC_DIRECT_NETS`
+- загружает списки подсетей из файлов (пути настраиваются в `.env`)
+- настраивает `nftables` (таблица `sc_split`), которая маркирует трафик:
+  - если `daddr` в `SC_RU_NETS` или `SC_DIRECT_NETS` — **direct** (через WAN)
+  - если `daddr` это сам сервер (SSH) — **direct**
+  - всё остальное — помечается `SPLIT_FWMARK` (0x65)
+- создаёт таблицу маршрутизации `tun` с default route в `tun0`
+- добавляет `ip rule fwmark 0x65 lookup tun`
+
+**Smoke-тесты:**
+1. Проверка зарубежного IP: `curl -4 https://ifconfig.me` (должен быть IP `server2`).
+2. Проверка российского IP (если ya.ru в `ru_nets.txt`): `curl -4 https://ya.ru`.
+3. Проверка маршрута: `ip route get 1.1.1.1` (должен показать `mark 0x65` и `table tun`).
 
 ---
 

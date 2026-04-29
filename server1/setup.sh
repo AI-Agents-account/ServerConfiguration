@@ -9,11 +9,12 @@ usage() {
 Usage:
   bash ./server1/setup.sh safe [server1/.env]
   bash ./server1/setup.sh full [server1/.env]
+  bash ./server1/setup.sh split [server1/.env]
 EOF
 }
 
 case "$MODE" in
-  safe|full) ;;
+  safe|full|split) ;;
   *)
     usage
     exit 1
@@ -31,6 +32,9 @@ case "$MODE" in
     ;;
   full)
     bash "$SCRIPT_DIR/install_full_tunnel_mode.sh" "$ENV_FILE"
+    ;;
+  split)
+    bash "$SCRIPT_DIR/install_split_mode.sh" "$ENV_FILE"
     ;;
 esac
 

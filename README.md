@@ -71,27 +71,22 @@ sudo bash ./server1/check_via_server2.sh server1/.env safe
 sudo via-server2 curl -4 https://ifconfig.me
 ```
 
-### 3. Перевести server1 в full-tunnel mode (опционально)
+### 3. Режимы server1 (Safe / Full / Split)
 
-> Внимание: full-tunnel может повлиять на SSH и другой исходящий трафик. Делать только при наличии аварийного доступа через консоль провайдера.
+- **Safe mode**: только для пользователя `tunroute`.
+  ```bash
+  sudo bash ./server1/setup.sh safe server1/.env
+  ```
+- **Full-tunnel mode**: весь egress через `tun0`.
+  ```bash
+  sudo bash ./server1/setup.sh full server1/.env
+  ```
+- **Split-routing mode**: зарубежный трафик через `tun0`, RU напрямую.
+  ```bash
+  sudo bash ./server1/setup.sh split server1/.env
+  ```
 
-Инициализация:
-
-```bash
-sudo bash ./start.sh
-```
-
-Применение:
-
-```bash
-sudo bash ./server1/setup.sh full server1/.env
-```
-
-Проверка:
-
-```bash
-sudo bash ./server1/check_via_server2.sh server1/.env full
-```
+Подробности в `server1/README.md`.
 
 ---
 
@@ -99,57 +94,25 @@ sudo bash ./server1/check_via_server2.sh server1/.env full
 
 ### Safe mode
 Рекомендуется по умолчанию.
+...
+### Split-routing mode
+Автоматическое разделение трафика.
+- требует `nftables` и `ipset`
+- RU ресурсы → WAN
+- зарубежные ресурсы → `server2`
+- безопасен для SSH (встроены исключения)
 
-- туннель работает только для отдельного системного пользователя `tunroute`
-- команды через туннель запускаются так:
-
-```bash
-sudo via-server2 curl -4 https://ifconfig.me
-```
-
-Подходит для:
-- безопасной проверки
-- выборочного трафика
-- сценариев, где нельзя рисковать SSH-доступом
-
-### Full-tunnel mode
-Весь исходящий трафик сервера уводится в `tun2socks`, кроме явно исключённого.
-
-Подходит только если:
-- есть консольный доступ к серверу
-- вы понимаете последствия policy routing / nftables
-- нужно увести наружу именно весь egress
-
-### Split-routing mode (планируется)
-Режим, при котором:
-- трафик к российским/внутренним ресурсам продолжает идти напрямую через WAN;
-- трафик к зарубежным ресурсам уводится через `tun0` и `server2`;
-- SSH‑доступ к `server1` явно зафиксирован и не попадает под редиректы.
-
-Подробный план реализации, варианты (ipset+nftables, dnsmasq+domain‑sets, policy routing) и порядок внедрения без потери SSH описаны в разделе 9 `HARDENING_PLAN.md`.
+Детальная архитектура: `docs/split-routing-architecture.md`.
 
 ---
 
 ## Smoke tests
-
-### SOCKS-проверка
-
-```bash
-curl -4 --socks5-hostname 127.0.0.1:1080 -s https://ifconfig.me
-```
-
-Ожидаемый результат: IP `server2`.
-
-### Safe mode
+...
+### Split-routing mode
 
 ```bash
-sudo via-server2 curl -4 -s https://ifconfig.me
-```
-
-### Full mode
-
-```bash
-curl -4 -s https://ifconfig.me
+curl -4 https://ifconfig.me
+# (Ожидаем IP server2)
 ```
 
 ---
