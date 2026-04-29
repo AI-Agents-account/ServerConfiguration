@@ -398,3 +398,188 @@ SINGBOX_CONFIG_PATH="/etc/sing-box/config.json"
 - **safe-режим удалён**,
 - split-роутинг реализуется через **Sing-box с GeoIP/GeoSite**, без статических списков подсетей,
 - devops должен обновить реализацию в ветке `feature/split-routing` и сопутствующую документацию/юниты в соответствии с разделами 7–8.
+
+## 9. VPN‑сервисы на server1 (WireGuard + публичный VPN‑набор)
+
+### 9.1. Роли server1 после интеграции
+
+После интеграции пакетов `wireguard` и `vpn_install` `server1` выполняет сразу три роли:
+
+1. **Egress‑клиент к server2** — как и ранее, через Sing-box (TUN) в режимах `full` / `split`.
+2. **Входной VPN‑шлюз для конечных клиентов**:
+   - WireGuard‑сервер (`wg0` на UDP :7666 по умолчанию) с собственным DNS `10.66.66.1`.
+   - Мультипрофильный публичный VPN‑набор (`vpn_install`) на порту :443 (VLESS+Reality, Trojan, Hysteria2, TrustTunnel), основанный на отдельном экземпляре Sing-box + TrustTunnel + Hysteria2.
+3. **Маршрутизатор для клиентского трафика** — весь трафик клиентов WireGuard / публичного VPN проходит через те же egress‑правила `full` / `split`, что и локальные процессы на `server1`.
+
+### 9.2. Потоки трафика
+
+Высокоуровневая схема после интеграции:
+
+- **server1 → server2 (egress):**
+  - Sing-box‑клиент (`sing-box-server2.service`) поднимает `tun0` и в зависимости от `TUN_MODE` (full/split) направляет трафик либо целиком, либо выборочно в туннель на `server2`.
+
+- **Клиенты WireGuard → Интернет:**
+  - Клиент подключается к `wg0` (`10.66.66.0/24`, UDP :7666).
+  - DNS‑запросы клиентов обслуживает `dnsmasq` на `10.66.66.1:53`.
+  - Egress для подсети `WG_NET` по умолчанию идёт через `EGRESS_IF=tun0`, то есть **через Sing-box‑туннель на server2**.
+  - При необходимости диагностики/байпаса предусмотрены утилиты `apply_egress_direct.sh` / `remove_egress_direct.sh`, которые временно переключают egress WG‑клиентов на прямой uplink server1.
+
+- **Клиенты публичного VPN‑набора (`vpn_install`) → Интернет:**
+  - Входные протоколы (VLESS+Reality, Trojan, Hysteria2, TrustTunnel) терминируются на Sing-box‑сервере `vpn_install` и/или TrustTunnel/Hysteria2.
+  - Внутри Sing-box‑конфига `vpn_install` outbound = `direct`, поэтому дальнейший egress определяется **системной маршрутизацией** server1:
+    - в режиме `full`/`split` default‑маршрут указывает на `tun0`,
+    - значит клиентский трафик публичного VPN по умолчанию также идёт через туннель на `server2` с соблюдением split‑логики.
+
+Тем самым, **все входящие VPN‑клиенты автоматически наследуют политику `full` / `split`, настроенную на самом server1`**.
+
+### 9.3. Разделение экземпляров Sing-box (клиент vs сервер)
+
+Чтобы избежать конфликта за `/etc/sing-box/config.json` и systemd‑юнит, реализация должна развести клиентский и серверный экземпляры Sing-box:
+
+- **Egress‑клиент к server2 (server1)**:
+  - Конфиг: `/etc/sing-box/client-server2.json` (или аналогичный путь, фиксируется в `render_singbox_config.sh`).
+  - Юнит: `sing-box-server2.service` (уже используется `server1/setup.sh`).
+  - Управление: только скрипты в `server1/`.
+
+- **Публичный VPN‑сервер (vpn_install)**:
+  - Конфиг: `/etc/sing-box/vpn-server.json` (переименование текущего `/etc/sing-box/config.json` из `vpn_install/setup.sh`).
+  - Юнит: например, `sing-box-vpn.service` (переименование текущего `sing-box.service` из `vpn_install`).
+  - Пользователь службы: `singbox` (как задано в `vpn_install`).
+
+Требования к devops:
+
+1. Обновить `server1/render_singbox_config.sh`, чтобы он больше **не перезаписывал** конфиг, используемый `vpn_install`, и писал только клиентский `client-server2.json`.
+2. Обновить `server1/setup.sh`, чтобы `ExecStart` в `sing-box-server2.service` ссылался на клиентский конфиг (`-c /etc/sing-box/client-server2.json`).
+3. В `vpn_install/setup.sh` переименовать путь к конфигу и systemd‑юниту на серверную пару (`/etc/sing-box/vpn-server.json`, `sing-box-vpn.service`).
+4. Явно зафиксировать, что **клиентский** и **серверный** экземпляры Sing-box могут одновременно работать на одной машине, не вмешиваясь друг в друга.
+
+### 9.4. Файервол и порядок применения правил
+
+Особенность текущих скриптов:
+
+- `vpn_install/setup.sh` делает **жёсткий reset UFW** и заново задаёт базовую политику (разрешает :22, :80, :443 TCP/UDP и т.д.).
+- `wireguard/setup.sh` добавляет iptables‑правила для `wg0`, а также настраивает UFW (если установлен), **поверх** существующей конфигурации.
+
+Чтобы не терять правила WireGuard после `vpn_install`:
+
+- Базовый порядок в `server1/setup.sh` должен быть:
+
+  1. Настройка egress‑клиента Sing-box (`install_singbox.sh` + `render_singbox_config.sh`).
+  2. Запуск/обновление публичного VPN‑набора (`vpn_install`), включая UFW reset.
+  3. Настройка WireGuard (`wireguard/setup.sh`), добавляющего свои правила поверх уже заданного firewall‑профиля.
+
+- В результате:
+  - UFW‑база формируется `vpn_install`.
+  - WireGuard‑правила (порт UDP :7666 + DNS на wg0) накатываются после и не затираются.
+
+### 9.5. Встраивание `wireguard` и `vpn_install` в `server1/setup.sh`
+
+Требования по UX:
+
+- При запуске `server1/setup.sh` в режимах `full` / `split` должны **автоматически подниматься все необходимые VPN‑сервисы server1**, при наличии соответствующих env‑файлов.
+
+Предлагаемая схема:
+
+1. **Env‑файлы:**
+
+   - `server1/.env` — как сейчас, для egress‑клиента (TUN_SSIP, SS_SERVER_PORT и т.д.).
+   - `server1/vpn.env` — настройки публичного VPN‑набора (DOMAIN, TRUSTTUNNEL_DOMAIN, EMAIL, PORT_PUBLIC и др. из `vpn_install/.env.example`).
+   - `server1/wireguard.env` (опционально) — переопределения WG‑переменных (WG_PORT, WG_NET, EGRESS_IF и т.п.), если значения по умолчанию не подходят.
+
+2. **Флаги включения (в `server1/.env`):**
+
+   ```dotenv
+   ENABLE_SERVER1_PUBLIC_VPN="1"   # управляет запуском vpn_install
+   ENABLE_SERVER1_WIREGUARD="1"    # управляет запуском wireguard/setup.sh
+   ```
+
+   Если флаг = "0" или env‑файл отсутствует — соответствующий блок пропускается, чтобы сохранить гибкость.
+
+3. **Логика в `server1/setup.sh` (после настройки Sing-box):**
+
+   Псевдокод:
+
+   ```bash
+   # 2.1 Публичный VPN‑набор (sing-box сервер + TrustTunnel + Hysteria2)
+   if [[ "${ENABLE_SERVER1_PUBLIC_VPN:-1}" == "1" && -f "${SCRIPT_DIR}/vpn.env" ]]; then
+     bash "${SCRIPT_DIR}/vpn_setup.sh" "${SCRIPT_DIR}/vpn.env"
+   fi
+
+   # 2.2 WireGuard‑сервер
+   if [[ "${ENABLE_SERVER1_WIREGUARD:-1}" == "1" ]]; then
+     # EGRESS_IF по умолчанию = tun0, чтобы трафик клиентов WG шёл через туннель server2
+     EGRESS_IF="tun0" bash "${SCRIPT_DIR}/wireguard_setup.sh" "${WIREGUARD_CLIENT_NAME:-greenapple}"
+   fi
+   ```
+
+   Здесь `vpn_setup.sh` и `wireguard_setup.sh` — тонкие врапперы над перенесёнными из корня `vpn_install/setup.sh` и `wireguard/setup.sh`, адаптированные по путям/именам сервисов.
+
+4. **Idempotency:** повторный запуск `server1/setup.sh` в том же режиме должен:
+
+   - аккуратно обновлять конфиги Sing-box (клиентский и серверный),
+   - не дублировать iptables‑правила для WireGuard (скрипт уже содержит PostUp/PostDown‑hooks на уровне `wg-quick@wg0`),
+   - перезапускать только нужные systemd‑юниты.
+
+### 9.6. Структура репозитория после интеграции
+
+Чтобы убрать дублирование и выполнить требование удаления корневых директорий `wireguard` и `vpn_install`:
+
+- Перенести содержимое `wireguard/` → `server1/wireguard/` (включая README и утилиты `apply_egress_direct.sh`, `remove_egress_direct.sh`).
+- Перенести содержимое `vpn_install/` → `server1/vpn_install/` или `server1/public_vpn/` (название на усмотрение, но единообразно по всему коду/докам).
+- Обновить все скрипты и README, которые ссылаются на старые пути (`wireguard/`, `vpn_install/` в корне репозитория), на новые (`server1/...`).
+- После успешной миграции и обновления ссылок корневые директории `wireguard/` и `vpn_install/` должны быть **удалены из ветки `feature/split-routing`** (через `git rm`).
+
+## 10. Дополнительные ToDo для devops по VPN на server1
+
+В дополнение к разделам 7–8:
+
+1. **WireGuard‑интеграция:**
+   - Перенести скрипты из `wireguard/` в `server1/wireguard/`.
+   - Добавить враппер `server1/wireguard_setup.sh` (или аналогичный), который:
+     - читает `server1/wireguard.env` (если есть),
+     - задаёт `EGRESS_IF=tun0` по умолчанию,
+     - вызывает оригинальный `setup.sh` c параметром `CLIENT_NAME`.
+   - Обновить документацию (`server1/README.md` и новый подраздел в этом документе) с примером запуска и местом расположения клиентских конфигов (`/root/wireguard-clients/...`).
+
+2. **Интеграция `vpn_install`:**
+   - Перенести содержимое `vpn_install/` под `server1/` и адаптировать пути (шаблоны клиентов, env, systemd‑юниты).
+   - Разделить конфиги/юниты Sing-box (см. 9.3) и убедиться, что клиентский и серверный экземпляры coexist‑ят.
+   - Добавить лёгкий враппер `server1/vpn_setup.sh`, который вызывает адаптированный `vpn_install/setup.sh` с `server1/vpn.env`.
+
+3. **Изменения в `server1/setup.sh`:**
+   - Реализовать описанный выше порядок вызовов (сначала egress Sing-box, затем `vpn_install`, затем WireGuard).
+   - Добавить флаги `ENABLE_SERVER1_PUBLIC_VPN`, `ENABLE_SERVER1_WIREGUARD` в `.env.example` и учесть их в логике скрипта.
+
+4. **Чистка корня репозитория:**
+   - После миграции удалить директории `wireguard/` и `vpn_install/` из корня (`git rm`),
+   - Обновить корневой `README.md`, если он ссылается на старые пути.
+
+5. **Smoke‑тесты для VPN‑сервисов на server1:**
+
+   - Проверка, что серверные сервисы поднялись:
+
+     ```bash
+     sudo systemctl status sing-box-vpn.service trusttunnel.service hysteria.service wg-quick@wg0.service --no-pager || true
+     ```
+
+   - Проверка внешнего IP для клиента WireGuard (должен совпадать с egress server2 в full‑режиме):
+
+     ```bash
+     # На клиенте WireGuard после подключения к wg0
+     curl -4 https://ifconfig.me
+     ```
+
+   - Проверка доступа через публичный VLESS‑профиль (tun на клиенте + split/full на server1):
+
+     ```bash
+     # На клиенте sing-box с сгенерированным конфигом
+     curl -4 https://ifconfig.me
+     ```
+
+   - Проверка, что SSH к server1 остаётся доступным при активных всех VPN‑сервисах:
+
+     ```bash
+     ssh user@server1 'echo OK && ip route get 1.1.1.1'
+     ```
+
+Эти дополнения фиксируют архитектуру VPN‑сервисов на `server1` и ожидаемую интеграцию пакетов `wireguard` и `vpn_install` в общий сценарий `server1/setup.sh`.

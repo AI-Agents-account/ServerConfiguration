@@ -37,7 +37,7 @@ After=network.target nss-lookup.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 Restart=on-failure
 RestartSec=10
 LimitNOFILE= infinity
@@ -55,5 +55,17 @@ systemctl disable tun2socks-server2.service sslocal-server2.service 2>/dev/null 
 
 # 5. Restart sing-box
 systemctl restart sing-box-server2.service
+
+# 6. Optional: VPN & WireGuard Server setup
+# VPN must be installed BEFORE WireGuard as it performs 'ufw reset'
+if [[ "${ENABLE_SERVER1_PUBLIC_VPN:-0}" == "1" ]]; then
+  echo "[setup] Installing Public VPN Server..."
+  bash "$SCRIPT_DIR/vpn_install/setup.sh" "$ENV_FILE"
+fi
+
+if [[ "${ENABLE_SERVER1_WIREGUARD:-0}" == "1" ]]; then
+  echo "[setup] Installing WireGuard Server..."
+  bash "$SCRIPT_DIR/wireguard/setup.sh" "$ENV_FILE"
+fi
 
 echo "[setup] Done: mode=$MODE env=$ENV_FILE. Sing-box is running."

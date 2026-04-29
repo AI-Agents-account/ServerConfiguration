@@ -21,7 +21,7 @@ if [[ -z "$SS_SERVER" || -z "$SS_PORT" || -z "$SS_PASSWORD" ]]; then
   exit 1
 fi
 
-cat <<EOF > /etc/sing-box/config.json
+cat <<EOF > /etc/sing-box/client-server2.json
 {
   "log": {
     "level": "info",
@@ -122,4 +122,4 @@ cat <<EOF >> /etc/sing-box/config.json
 }
 EOF
 
-echo "[render_singbox_config] Generated /etc/sing-box/config.json (mode=$TUN_MODE)"
+echo "[render_singbox_config] Generated /etc/sing-box/client-server2.json (mode=$TUN_MODE)"

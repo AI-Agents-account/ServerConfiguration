@@ -3,12 +3,14 @@
 Настройка связки:
 
 - **server2** — Shadowsocks server (`shadowsocks-libev`)
-- **server1** — клиентская сторона (**Sing-box** в режиме TUN)
+- **server1** — Sing-box клиент + публичный VPN-шлюз (VLESS, Trojan, Hysteria2, WireGuard)
 
 ## Структура
 
 - `server2/` — настройка сервера Shadowsocks
-- `server1/` — настройка клиента на базе **Sing-box**
+- `server1/` — настройка клиента Sing-box и VPN-серверов
+- `server1/vpn_install/` — скрипты развертывания публичного VPN
+- `server1/wireguard/` — скрипты развертывания WireGuard
 - `docs/` — архитектурные документы
 
 См. также:

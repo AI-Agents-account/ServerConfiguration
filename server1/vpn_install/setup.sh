@@ -251,7 +251,7 @@ systemctl restart trusttunnel || true
 
 # sing-box config
 install -d -m 0755 /etc/sing-box
-cat >/etc/sing-box/config.json <<EOF
+cat >/etc/sing-box/vpn-server.json <<EOF
 {
   "log": {"level": "info"},
   "inbounds": [
@@ -338,20 +338,20 @@ cat >/etc/sing-box/config.json <<EOF
   }
 }
 EOF
-chown root:${SINGBOX_USER} /etc/sing-box/config.json
-chmod 640 /etc/sing-box/config.json
+chown root:${SINGBOX_USER} /etc/sing-box/vpn-server.json
+chmod 640 /etc/sing-box/vpn-server.json
 
 # systemd service
-cat >/etc/systemd/system/sing-box.service <<'EOF'
+cat >/etc/systemd/system/sing-box-vpn.service <<'EOF'
 [Unit]
-Description=sing-box Service
+Description=sing-box VPN Server Service
 After=network.target
 
 [Service]
 User=singbox
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/vpn-server.json
 Restart=on-failure
 LimitNOFILE=65535
 
@@ -360,8 +360,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload || true
-systemctl enable sing-box || true
-systemctl restart sing-box || true
+systemctl enable sing-box-vpn || true
+systemctl restart sing-box-vpn || true
 
 # Standalone Hysteria2 server on UDP :443 (separate from sing-box)
 HYSTERIA_VERSION="${HYSTERIA_VERSION:-2.8.1}"

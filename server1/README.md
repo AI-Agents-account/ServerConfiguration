@@ -1,11 +1,13 @@
-# server1 — Sing-box Split/Full Tunnel
+# server1 — Sing-box Split/Full Tunnel & Public VPN
 
-Эта директория содержит скрипты для настройки `server1` как клиента к `server2` с использованием **Sing-box** в режиме TUN-интерфейса.
+Эта директория содержит скрипты для настройки `server1` как клиента к `server2` с использованием **Sing-box** в режиме TUN-интерфейса, а также для развертывания публичного VPN-сервера.
 
-Поддерживаются два режима:
+Поддерживаются два режима клиентского туннеля:
 
-- **full** — весь исходящий трафик сервера направляется через туннель.
-- **split** — автоматический роутинг: российский трафик (по GeoIP/GeoSite) идет напрямую, остальной — через туннель.
+- **full** — весь исходящий трафик сервера направляется через туннель к `server2`.
+- **split** — автоматический роутинг: российский трафик (по GeoIP/GeoSite) идет напрямую, остальной — через туннель к `server2`.
+
+Также сервер может выступать в роли VPN-шлюза (VLESS, Trojan, Hysteria2, WireGuard) для конечных пользователей.
 
 Детальный план реализации см. в `docs/split-routing-architecture.md`.
 
@@ -28,11 +30,21 @@ cp server1/.env.example server1/.env && nano server1/.env
 Минимально нужны:
 
 ```dotenv
+# Client-to-Server2 setup
 TUN_SSIP="89.167.112.24"
 SS_SERVER_PORT=6666
 SS_PASSWORD="testPassword"
 SS_METHOD="chacha20-ietf-poly1305"
 SERVER1_PUBLIC_IP="1.2.3.4" # Публичный IP этого сервера (для защиты SSH)
+
+# Optional: Enable Public VPN / WireGuard
+ENABLE_SERVER1_PUBLIC_VPN=1
+ENABLE_SERVER1_WIREGUARD=1
+
+# Required for Public VPN (VLESS/Trojan/Hysteria)
+DOMAIN="vpn.example.com"
+TRUSTTUNNEL_DOMAIN="tt.example.com"
+EMAIL="admin@example.com"
 ```
 
 ---
@@ -57,24 +69,30 @@ sudo bash ./server1/setup.sh split server1/.env
 
 ---
 
-## Что делает Sing-box (в обоих режимах)
-- Поднимает TUN-интерфейс `tun0` (172.19.0.1).
-- Управляет системной маршрутизацией через `auto_route`.
-- Классифицирует трафик:
-    - Локальные сети (10.0.0.0/8 и т.д.) -> Direct.
-    - SSH (порт 22 на PUBLIC_IP) -> Direct.
-    - (Только в split) `geoip:ru` и `geosite:category-gov-ru` -> Direct.
-    - Все остальное -> Shadowsocks через `server2`.
+## Архитектура Sing-box
+
+На `server1` запускаются два раздельных инстанса Sing-box:
+
+1.  **Client Instance** (`sing-box-server2.service`):
+    - Использует конфиг `/etc/sing-box/client-server2.json`.
+    - Поднимает TUN-интерфейс для проброса трафика сервера на `server2`.
+2.  **Server Instance** (`sing-box-vpn.service`):
+    - Использует конфиг `/etc/sing-box/vpn-server.json`.
+    - Принимает входящие подключения пользователей (VLESS, Trojan).
 
 ## Диагностика
 
 ```bash
-# Статус сервиса
+# Статус клиентского туннеля
 sudo systemctl status sing-box-server2.service --no-pager
 
-# Логи
-sudo journalctl -u sing-box-server2.service -n 100 --no-pager
+# Статус VPN-сервера
+sudo systemctl status sing-box-vpn.service --no-pager
 
-# Проверка внешнего IP
+# Логи
+sudo journalctl -u sing-box-server2.service -f
+sudo journalctl -u sing-box-vpn.service -f
+
+# Проверка внешнего IP (должен быть IP от server2)
 curl -4 https://ifconfig.me
 ```
