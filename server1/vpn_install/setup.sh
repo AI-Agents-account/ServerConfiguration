@@ -753,6 +753,7 @@ IOS_HY2_EOF
 
 # Windows sing-box (TUN) configs (full-tunnel)
 # Generated from templates in vpn_install/clients
+export TEMPLATES_DIR CLIENT_DIR DOMAIN PORT_PUBLIC VLESS_UUID TROJAN_PASSWORD REALITY_SERVER_NAME REALITY_PUBLIC_KEY REALITY_SHORT_ID HYSTERIA2_PASSWORD
 python3 - <<'PY'
 import os, pathlib
 
