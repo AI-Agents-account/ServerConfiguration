@@ -48,6 +48,7 @@ After=network.target nss-lookup.target
 Type=simple
 User=root
 WorkingDirectory=/var/lib/sing-box
+Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true"
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 Restart=on-failure
 RestartSec=10
