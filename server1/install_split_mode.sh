@@ -129,6 +129,11 @@ nft flush chain inet sc_split mark_for_tun
 # Rules:
 # Skip SSH ingress/egress to self
 nft add rule inet sc_split mark_for_tun ip daddr ${server_ip} tcp dport 22 return
+# Keep local WG subnet unmarked
+nft add rule inet sc_split mark_for_tun ip daddr 10.66.66.0/24 return
+# Keep DNS unmarked (UDP/TCP 53) because tun2socks path may not support UDP reliably
+nft add rule inet sc_split mark_for_tun udp dport 53 return
+nft add rule inet sc_split mark_for_tun tcp dport 53 return
 # Skip WireGuard control traffic (must never be routed into tun0)
 nft add rule inet sc_split mark_for_tun udp dport ${WG_PORT} return
 nft add rule inet sc_split mark_for_tun udp sport ${WG_PORT} return
