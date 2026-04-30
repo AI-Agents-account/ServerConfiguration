@@ -135,6 +135,23 @@ nft add rule inet sc_split mark_for_tun ip daddr @SC_RU_NETS return
 # Mark everything else for tun
 nft add rule inet sc_split mark_for_tun meta mark set ${SPLIT_FWMARK}
 
+# Also handle forwarded traffic (e.g. from WireGuard wg0)
+nft "add chain inet sc_split mark_for_tun_fwd { type filter hook prerouting priority mangle; policy accept; }" 2>/dev/null || true
+nft flush chain inet sc_split mark_for_tun_fwd
+nft add rule inet sc_split mark_for_tun_fwd ip daddr ${server_ip} return
+nft add rule inet sc_split mark_for_tun_fwd ip daddr @SC_DIRECT_NETS return
+nft add rule inet sc_split mark_for_tun_fwd ip daddr @SC_RU_NETS return
+nft add rule inet sc_split mark_for_tun_fwd iifname "wg0" meta mark set ${SPLIT_FWMARK}
+nft add rule inet sc_split mark_for_tun_fwd iifname "tun0" return
+
+# Block IPv6 egress to prevent leaks and timeouts since tun0 is IPv4 only
+nft "add chain inet sc_split block_ipv6_out { type filter hook output priority filter; policy accept; }" 2>/dev/null || true
+nft flush chain inet sc_split block_ipv6_out
+nft add rule inet sc_split block_ipv6_out meta nfproto ipv6 fib daddr type != { local, multicast } reject
+nft "add chain inet sc_split block_ipv6_fwd { type filter hook forward priority filter; policy accept; }" 2>/dev/null || true
+nft flush chain inet sc_split block_ipv6_fwd
+nft add rule inet sc_split block_ipv6_fwd meta nfproto ipv6 reject
+
 log "Split-routing rules applied."
 EOF
   chmod 0755 /usr/local/sbin/tun2socks-apply-split-routing.sh
