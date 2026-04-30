@@ -76,7 +76,7 @@ fi
 
 if [[ "${ENABLE_SERVER1_WIREGUARD:-0}" == "1" ]]; then
   echo "[setup] Installing WireGuard Server..."
-  bash "$SCRIPT_DIR/wireguard/setup.sh" "$ENV_FILE"
+  bash "$SCRIPT_DIR/wireguard/setup.sh" "mobile-client"
 fi
 
 echo "[setup] Done: mode=$MODE env=$ENV_FILE. Sing-box is running."
