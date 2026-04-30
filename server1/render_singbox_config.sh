@@ -69,8 +69,7 @@ cat <<EOF > /etc/sing-box/client-server2.json
       "mtu": 9000,
       "auto_route": true,
       "strict_route": true,
-      "stack": "system",
-      "sniff": true
+      "stack": "system"
     }
   ],
   "outbounds": [
