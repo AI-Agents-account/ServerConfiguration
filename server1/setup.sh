@@ -42,7 +42,8 @@ TUN_MODE="$MODE" bash "$SCRIPT_DIR/render_singbox_config.sh" "$ENV_FILE"
 cat <<EOF > /etc/systemd/system/sing-box-server2.service
 [Unit]
 Description=sing-box Service
-After=network.target nss-lookup.target
+After=network-online.target nss-lookup.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -50,10 +51,11 @@ User=root
 WorkingDirectory=/var/lib/sing-box
 Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true"
 Environment="ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
+ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 Restart=on-failure
 RestartSec=10
-LimitNOFILE= infinity
+LimitNOFILE=infinity
 
 [Install]
 WantedBy=multi-user.target
@@ -68,6 +70,16 @@ systemctl disable tun2socks-server2.service sslocal-server2.service 2>/dev/null 
 
 # 5. Restart sing-box
 systemctl restart sing-box-server2.service
+
+# 5.1 Prevent routing loop to server2 IP when sing-box auto_route installs policy routing.
+# sing-box creates table 2022 by default; ensure server2 (Shadowsocks) destination stays reachable via WAN.
+if [[ -n "${TUN_SSIP:-}" ]]; then
+  gw="$(ip route show default | awk '/default/ {print $3; exit}')"
+  iface="$(ip route show default | awk '/default/ {for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  if [[ -n "$gw" && -n "$iface" ]]; then
+    ip route replace "${TUN_SSIP}/32" via "$gw" dev "$iface" table 2022 2>/dev/null || true
+  fi
+fi
 
 # 6. Optional: VPN & WireGuard Server setup
 # VPN must be installed BEFORE WireGuard as it performs 'ufw reset'
