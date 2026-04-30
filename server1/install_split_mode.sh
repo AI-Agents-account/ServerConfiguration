@@ -28,6 +28,7 @@ load_env() {
   : "${TUN2SOCKS_MTU:=1500}"
   
   : "${SPLIT_FWMARK:=0x65}"
+  : "${WG_PORT:=7666}"
   : "${SPLIT_RU_NETS_FILE:=/etc/server1-split/ru_nets.txt}"
   : "${SPLIT_DIRECT_NETS_FILE:=/etc/server1-split/direct_nets.txt}"
 }
@@ -128,6 +129,9 @@ nft flush chain inet sc_split mark_for_tun
 # Rules:
 # Skip SSH ingress/egress to self
 nft add rule inet sc_split mark_for_tun ip daddr ${server_ip} tcp dport 22 return
+# Skip WireGuard control traffic (must never be routed into tun0)
+nft add rule inet sc_split mark_for_tun udp dport ${WG_PORT} return
+nft add rule inet sc_split mark_for_tun udp sport ${WG_PORT} return
 # Skip Direct nets (via WAN)
 nft add rule inet sc_split mark_for_tun ip daddr @SC_DIRECT_NETS return
 # Skip RU nets (via WAN)
