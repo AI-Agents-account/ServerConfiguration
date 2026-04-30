@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ENV_FILE="${1:-server1/.env}"
-TUN_MODE="${TUN_MODE:-full}"
+TUN_MODE="${TUN_MODE:-split}" # Requirements imply split routing
 
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
@@ -16,39 +16,30 @@ SS_METHOD="${TUN_SSMETHOD:-${SS_METHOD:-aes-256-gcm}}"
 SS_PASSWORD="${TUN_SSPASSWORD:-${SS_PASSWORD:-}}"
 SERVER1_PUBLIC_IP="${SERVER1_PUBLIC_IP:-}"
 
+# Inbound ports for bypass (to avoid loops and broken replies)
+PORT_PUBLIC="${PORT_PUBLIC:-443}"
+PORT_VLESS_REALITY_TCP="${PORT_VLESS_REALITY_TCP:-8443}"
+PORT_TROJAN_TLS_TCP="${PORT_TROJAN_TLS_TCP:-2053}"
+PORT_HYSTERIA2_QUIC_UDP="${PORT_HYSTERIA2_QUIC_UDP:-8443}"
+PORT_TRUSTTUNNEL="${PORT_TRUSTTUNNEL:-9443}"
+WG_PORT="${WG_PORT:-7666}"
+
 if [[ -z "$SS_SERVER" || -z "$SS_PORT" || -z "$SS_PASSWORD" ]]; then
-  echo "ERROR: Missing required Shadowsocks variables (TUN_SSIP/SS_SERVER, TUN_SSPORT/SS_SERVER_PORT, TUN_SSPASSWORD/SS_PASSWORD)" >&2
+  echo "ERROR: Missing Shadowsocks variables (TUN_SSIP/SS_SERVER, TUN_SSPORT/SS_SERVER_PORT, TUN_SSPASSWORD/SS_PASSWORD)" >&2
   exit 1
 fi
 
-# Prepare mode-specific rules
-ROUTE_RULES=""
-DNS_RULES=""
+# Rule sets URLs
+GEOIP_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs"
+GEOSITE_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-ru.srs"
 
+# Rules logic
 if [[ "$TUN_MODE" == "split" ]]; then
-  # RU domains and IPs go direct. 
-  # Note: 'geosite:ru' includes many RU domains.
-  # 'geoip:ru' includes RU IP ranges.
-  ROUTE_RULES='{
-        "geoip": ["ru"],
-        "geosite": ["ru", "category-gov-ru"],
-        "outbound": "direct"
-      },'
-  
-  # DNS rules: RU domains resolved locally, others via proxy
-  DNS_RULES='{
-        "geosite": ["ru", "category-gov-ru"],
-        "server": "local"
-      },
-      {
-        "outbound": "proxy",
-        "server": "google"
-      },'
+  ROUTE_RULE_RU='{ "rule_set": ["geoip-ru", "geosite-ru"], "outbound": "direct" },'
+  DNS_RULE_RU='{ "rule_set": "geosite-ru", "server": "local" },'
 else
-  # Full tunnel mode: prefer proxy DNS for everything
-  DNS_RULES='{
-        "server": "google"
-      },'
+  ROUTE_RULE_RU=""
+  DNS_RULE_RU=""
 fi
 
 # Optional bypass for local public IP
@@ -63,6 +54,12 @@ cat <<EOF > /etc/sing-box/client-server2.json
     "level": "info",
     "timestamp": true
   },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "/var/lib/sing-box/cache.db"
+    }
+  },
   "inbounds": [
     {
       "type": "tun",
@@ -73,12 +70,7 @@ cat <<EOF > /etc/sing-box/client-server2.json
       "auto_route": true,
       "strict_route": true,
       "stack": "system",
-      "sniff": true,
-      "platform": {
-        "http_proxy": {
-          "enabled": false
-        }
-      }
+      "sniff": true
     }
   ],
   "outbounds": [
@@ -101,6 +93,22 @@ cat <<EOF > /etc/sing-box/client-server2.json
   ],
   "route": {
     "auto_detect_interface": true,
+    "rule_set": [
+      {
+        "tag": "geoip-ru",
+        "type": "remote",
+        "format": "binary",
+        "url": "$GEOIP_RU_URL",
+        "download_detour": "direct"
+      },
+      {
+        "tag": "geosite-ru",
+        "type": "remote",
+        "format": "binary",
+        "url": "$GEOSITE_RU_URL",
+        "download_detour": "direct"
+      }
+    ],
     "rules": [
       {
         "protocol": "dns",
@@ -118,7 +126,18 @@ cat <<EOF > /etc/sing-box/client-server2.json
         ],
         "outbound": "direct"
       },
-      $ROUTE_RULES
+      {
+        "source_port": [
+          $PORT_PUBLIC,
+          $PORT_VLESS_REALITY_TCP,
+          $PORT_TROJAN_TLS_TCP,
+          $PORT_HYSTERIA2_QUIC_UDP,
+          $PORT_TRUSTTUNNEL,
+          $WG_PORT
+        ],
+        "outbound": "direct"
+      },
+      $ROUTE_RULE_RU
       {
         "outbound": "proxy"
       }
@@ -138,9 +157,9 @@ cat <<EOF > /etc/sing-box/client-server2.json
       }
     ],
     "rules": [
-      $DNS_RULES
+      $DNS_RULE_RU
       {
-        "server": "local"
+        "server": "google"
       }
     ],
     "final": "local"
@@ -148,4 +167,4 @@ cat <<EOF > /etc/sing-box/client-server2.json
 }
 EOF
 
-echo "[render_singbox_config] Generated /etc/sing-box/client-server2.json (mode=$TUN_MODE)"
+echo "[render_singbox_config] Generated /etc/sing-box/client-server2.json (mode=$TUN_MODE, compatible with 1.12+ rule_set)"

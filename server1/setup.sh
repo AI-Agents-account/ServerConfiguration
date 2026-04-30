@@ -47,6 +47,7 @@ After=network.target nss-lookup.target
 [Service]
 Type=simple
 User=root
+WorkingDirectory=/var/lib/sing-box
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 Restart=on-failure
 RestartSec=10

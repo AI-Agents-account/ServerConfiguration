@@ -29,9 +29,19 @@ main() {
     *) echo "Unsupported arch: $arch" >&2; exit 1 ;;
   esac
 
-  # Fetch latest release download URL for the architecture
-  url="$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r ".assets[] | select(.name|test(\"sing-box-.*-${sb_arch}.tar.gz\")) | .browser_download_url" | head -n1)"
-  [[ -n "$url" ]] || { echo "ERROR: failed to resolve sing-box download URL" >&2; exit 1; }
+  # Version 1.13.6 is stable and supports rule_set
+  local version="1.13.6"
+  
+  if command -v sing-box >/dev/null 2>&1; then
+    local current_version
+    current_version=$(sing-box version | head -n1 | awk '{print $3}')
+    if [[ "$current_version" == "$version" ]]; then
+      log "sing-box $version already installed."
+      return
+    fi
+  fi
+
+  url="https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-linux-${sb_arch}.tar.gz"
 
   tmpd="$(mktemp -d)"
   trap 'rm -rf "$tmpd"' EXIT
@@ -44,16 +54,10 @@ main() {
   [[ -n "$bin_name" ]] || { echo "ERROR: extracted sing-box binary not found" >&2; exit 1; }
 
   install -m 0755 "$bin_name" /usr/local/bin/sing-box
-  /usr/local/bin/sing-box version >/dev/null
+  log "Installed sing-box $(/usr/local/bin/sing-box version | head -n1)"
 
   mkdir -p /etc/sing-box/
   mkdir -p /var/lib/sing-box/
-
-  log "Downloading geoip.db and geosite.db..."
-  curl -fL https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db -o /var/lib/sing-box/geoip.db
-  curl -fL https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db -o /var/lib/sing-box/geosite.db
-
-  log "Installed /usr/local/bin/sing-box and updated /var/lib/sing-box/ databases"
 }
 
 main "$@"
