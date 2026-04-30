@@ -119,8 +119,6 @@ domain-needed
 bogus-priv
 EOF
 
-  systemctl enable --now dnsmasq
-  systemctl restart dnsmasq
 
   # UFW rules (best-effort; if ufw is not installed, skip)
   if command -v ufw >/dev/null 2>&1; then
@@ -133,6 +131,8 @@ EOF
 
   systemctl enable --now "wg-quick@${WG_IF}"
   systemctl restart "wg-quick@${WG_IF}"
+  systemctl enable --now dnsmasq
+  systemctl restart dnsmasq
 
   # Client config
   install -d -m 0700 /root/wireguard-clients
