@@ -22,6 +22,13 @@ esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Load env so ENABLE_SERVER1_PUBLIC_VPN / ENABLE_SERVER1_WIREGUARD (and other vars)
+# affect control flow below.
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+fi
+
 # 1. Install Sing-box
 bash "$SCRIPT_DIR/install_singbox.sh"
 
