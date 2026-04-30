@@ -49,6 +49,7 @@ Type=simple
 User=root
 WorkingDirectory=/var/lib/sing-box
 Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true"
+Environment="ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 Restart=on-failure
 RestartSec=10
