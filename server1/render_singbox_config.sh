@@ -10,14 +10,18 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # Required variables (defaults or from .env)
-SS_SERVER="${TUN_SSIP:-}"
-SS_PORT="${SS_SERVER_PORT:-}"
-SS_METHOD="${SS_METHOD:-aes-256-gcm}"
-SS_PASSWORD="${SS_PASSWORD:-}"
+# Backward/forward compatibility note:
+# - Historically, server1/.env.example uses TUN_* variables.
+# - Some docs/scripts referenced SS_* variables.
+# We accept both, preferring TUN_*.
+SS_SERVER="${TUN_SSIP:-${SS_SERVER:-}}"
+SS_PORT="${TUN_SSPORT:-${SS_SERVER_PORT:-}}"
+SS_METHOD="${TUN_SSMETHOD:-${SS_METHOD:-aes-256-gcm}}"
+SS_PASSWORD="${TUN_SSPASSWORD:-${SS_PASSWORD:-}}"
 SERVER1_PUBLIC_IP="${SERVER1_PUBLIC_IP:-}"
 
 if [[ -z "$SS_SERVER" || -z "$SS_PORT" || -z "$SS_PASSWORD" ]]; then
-  echo "ERROR: Missing required SS variables (TUN_SSIP, SS_SERVER_PORT, SS_PASSWORD)" >&2
+  echo "ERROR: Missing required Shadowsocks variables (TUN_SSIP/SS_SERVER, TUN_SSPORT/SS_SERVER_PORT, TUN_SSPASSWORD/SS_PASSWORD)" >&2
   exit 1
 fi
 
@@ -75,7 +79,7 @@ cat <<EOF > /etc/sing-box/client-server2.json
 EOF
 
 if [[ -n "$SERVER1_PUBLIC_IP" ]]; then
-cat <<EOF >> /etc/sing-box/config.json
+cat <<EOF >> /etc/sing-box/client-server2.json
       {
         "ip_cidr": ["$SERVER1_PUBLIC_IP/32"],
         "outbound": "direct"
@@ -84,7 +88,7 @@ EOF
 fi
 
 if [[ "$TUN_MODE" == "split" ]]; then
-cat <<EOF >> /etc/sing-box/config.json
+cat <<EOF >> /etc/sing-box/client-server2.json
       {
         "geoip": ["ru"],
         "geosite": ["category-gov-ru", "cn"],
@@ -93,7 +97,7 @@ cat <<EOF >> /etc/sing-box/config.json
 EOF
 fi
 
-cat <<EOF >> /etc/sing-box/config.json
+cat <<EOF >> /etc/sing-box/client-server2.json
       {
         "outbound": "proxy"
       }
