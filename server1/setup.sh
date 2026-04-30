@@ -29,6 +29,9 @@ if [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
 fi
 
+# 0. Install VPN Clients
+bash "$SCRIPT_DIR/install_vpn_clients.sh"
+
 # 1. Install Sing-box
 bash "$SCRIPT_DIR/install_singbox.sh"
 
