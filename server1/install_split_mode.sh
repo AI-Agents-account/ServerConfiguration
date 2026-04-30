@@ -83,21 +83,23 @@ ip route replace default dev ${TUN2SOCKS_TUN_DEV} table tun
 # 3. Add policy rule
 ip rule add priority 1100 fwmark ${SPLIT_FWMARK} lookup tun
 
-# 4. IPSET management
-ipset create SC_RU_NETS hash:net -exist
-ipset create SC_DIRECT_NETS hash:net -exist
+# 4. NFTables Sets management
+# We use a dedicated table to avoid mess with existing rules
+nft list table inet sc_split >/dev/null 2>&1 || nft add table inet sc_split
 
-ipset flush SC_RU_NETS
-ipset flush SC_DIRECT_NETS
+nft "add set inet sc_split SC_RU_NETS { type ipv4_addr; flags interval; }"
+nft flush set inet sc_split SC_RU_NETS
+nft "add set inet sc_split SC_DIRECT_NETS { type ipv4_addr; flags interval; }"
+nft flush set inet sc_split SC_DIRECT_NETS
 
 # Load RU_NETS
 if [[ -f "${SPLIT_RU_NETS_FILE}" ]]; then
   log "Loading RU nets from ${SPLIT_RU_NETS_FILE}"
   while read -r net; do
-    net="\${net%%#*}"
-    net="\${net// /}"
-    [[ -n "\$net" ]] || continue
-    ipset add SC_RU_NETS "\$net" -exist
+    net="${net%%#*}"
+    net="${net// /}"
+    [[ -n "$net" ]] || continue
+    nft add element inet sc_split SC_RU_NETS { "$net" } 2>/dev/null || true
   done <"${SPLIT_RU_NETS_FILE}"
 fi
 
@@ -105,21 +107,19 @@ fi
 if [[ -f "${SPLIT_DIRECT_NETS_FILE}" ]]; then
   log "Loading DIRECT nets from ${SPLIT_DIRECT_NETS_FILE}"
   while read -r net; do
-    net="\${net%%#*}"
-    net="\${net// /}"
-    [[ -n "\$net" ]] || continue
-    ipset add SC_DIRECT_NETS "\$net" -exist
+    net="${net%%#*}"
+    net="${net// /}"
+    [[ -n "$net" ]] || continue
+    nft add element inet sc_split SC_DIRECT_NETS { "$net" } 2>/dev/null || true
   done <"${SPLIT_DIRECT_NETS_FILE}"
 fi
 
 # Add default direct bypasses (gateway, SS server)
-ipset add SC_DIRECT_NETS "${gw}/32" -exist
-ipset add SC_DIRECT_NETS "${TUN_SSIP}/32" -exist
-ipset add SC_DIRECT_NETS "169.254.169.0/24" -exist
+nft add element inet sc_split SC_DIRECT_NETS { "${gw}" } 2>/dev/null || true
+nft add element inet sc_split SC_DIRECT_NETS { "${TUN_SSIP}" } 2>/dev/null || true
+nft add element inet sc_split SC_DIRECT_NETS { "169.254.169.0/24" } 2>/dev/null || true
 
 # 5. NFTABLES configuration
-# We use a dedicated table to avoid mess with existing rules
-nft list table inet sc_split >/dev/null 2>&1 || nft add table inet sc_split
 
 # Mark chain
 nft "add chain inet sc_split mark_for_tun { type route hook output priority mangle; policy accept; }"
@@ -133,6 +133,7 @@ nft add rule inet sc_split mark_for_tun ip daddr @SC_DIRECT_NETS return
 # Skip RU nets (via WAN)
 nft add rule inet sc_split mark_for_tun ip daddr @SC_RU_NETS return
 # Mark everything else for tun
+nft add rule inet sc_split mark_for_tun fib daddr type local return
 nft add rule inet sc_split mark_for_tun meta mark set ${SPLIT_FWMARK}
 
 # Also handle forwarded traffic (e.g. from WireGuard wg0)
@@ -141,6 +142,7 @@ nft flush chain inet sc_split mark_for_tun_fwd
 nft add rule inet sc_split mark_for_tun_fwd ip daddr ${server_ip} return
 nft add rule inet sc_split mark_for_tun_fwd ip daddr @SC_DIRECT_NETS return
 nft add rule inet sc_split mark_for_tun_fwd ip daddr @SC_RU_NETS return
+nft add rule inet sc_split mark_for_tun_fwd fib daddr type local return
 nft add rule inet sc_split mark_for_tun_fwd iifname "wg0" meta mark set ${SPLIT_FWMARK}
 nft add rule inet sc_split mark_for_tun_fwd iifname "tun0" return
 
