@@ -41,7 +41,7 @@ main() {
     fi
   fi
 
-  url="https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-linux-${sb_arch}.tar.gz"
+  url="https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-${sb_arch}.tar.gz"
 
   tmpd="$(mktemp -d)"
   trap 'rm -rf "$tmpd"' EXIT
