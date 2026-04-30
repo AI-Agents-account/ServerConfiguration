@@ -218,7 +218,7 @@ cp "${LE_FULLCHAIN}" /opt/trusttunnel/cert.pem
 cp "${LE_PRIVKEY}" /opt/trusttunnel/key.pem
 # TrustTunnel wizard can hang on some hosts even in non-interactive mode.
 # Run with a timeout. If REQUIRE_TRUSTTUNNEL_LE=1, do NOT fall back to self-signed.
-if ! timeout 180s ./setup_wizard -m non-interactive \
+if ! timeout 60s ./setup_wizard -m non-interactive \
     -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
     -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
     -n "${TRUSTTUNNEL_DOMAIN}" \
@@ -227,20 +227,92 @@ if ! timeout 180s ./setup_wizard -m non-interactive \
     --cert-type provided \
     --cert-chain-path /opt/trusttunnel/cert.pem \
     --cert-key-path /opt/trusttunnel/key.pem; then
-  if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
-    echo "[TrustTunnel] ERROR: setup_wizard failed with provided cert and REQUIRE_TRUSTTUNNEL_LE=1. Refusing self-signed fallback." >&2
-    echo "[TrustTunnel] Check: DNS for TRUSTTUNNEL_DOMAIN, inbound :80 for certbot HTTP-01, and that cert SAN includes TRUSTTUNNEL_DOMAIN." >&2
-    exit 21
-  fi
+  
+  # Workaround: If wizard failed but we have provided certs, create files manually.
+  if [[ -f /opt/trusttunnel/cert.pem && -f /opt/trusttunnel/key.pem ]]; then
+    echo "[TrustTunnel] setup_wizard failed; creating config files manually as a fallback..." >&2
+    
+    # Generate credentials.toml
+    cat >credentials.toml <<EOF
+[[client]]
+username = "${TRUSTTUNNEL_USERNAME}"
+password = "${TRUSTTUNNEL_PASSWORD}"
+EOF
 
-  echo "[TrustTunnel] setup_wizard failed or timed out with provided cert; retrying with self-signed (REQUIRE_TRUSTTUNNEL_LE=0)..." >&2
-  timeout 180s ./setup_wizard -m non-interactive \
-      -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
-      -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
-      -n "${TRUSTTUNNEL_DOMAIN}" \
-      --lib-settings vpn.toml \
-      --hosts-settings hosts.toml \
-      --cert-type self-signed
+    # Generate rules.toml (empty but valid)
+    cat >rules.toml <<EOF
+# Filter rules
+EOF
+
+    # Generate hosts.toml
+    cat >hosts.toml <<EOF
+ping_hosts = []
+speedtest_hosts = []
+reverse_proxy_hosts = []
+
+[[main_hosts]]
+hostname = "${TRUSTTUNNEL_DOMAIN}"
+cert_chain_path = "/opt/trusttunnel/cert.pem"
+private_key_path = "/opt/trusttunnel/key.pem"
+allowed_sni = []
+EOF
+
+    # Generate vpn.toml (minimal working config)
+    cat >vpn.toml <<EOF
+listen_address = "127.0.0.1:${PORT_TRUSTTUNNEL}"
+credentials_file = "credentials.toml"
+rules_file = "rules.toml"
+ipv6_available = true
+allow_private_network_connections = false
+tls_handshake_timeout_secs = 10
+client_listener_timeout_secs = 600
+connection_establishment_timeout_secs = 30
+tcp_connections_timeout_secs = 604800
+udp_connections_timeout_secs = 300
+speedtest_enable = false
+ping_enable = false
+auth_failure_status_code = 407
+[forward_protocol]
+[forward_protocol.direct]
+[listen_protocols]
+[listen_protocols.http1]
+upload_buffer_size = 32768
+[listen_protocols.http2]
+initial_connection_window_size = 8388608
+initial_stream_window_size = 131072
+max_concurrent_streams = 1000
+max_frame_size = 16384
+header_table_size = 65536
+[listen_protocols.quic]
+recv_udp_payload_size = 1350
+send_udp_payload_size = 1350
+initial_max_data = 104857600
+initial_max_stream_data_bidi_local = 1048576
+initial_max_stream_data_bidi_remote = 1048576
+initial_max_stream_data_uni = 1048576
+initial_max_streams_bidi = 4096
+initial_max_streams_uni = 4096
+max_connection_window = 25165824
+max_stream_window = 16777216
+disable_active_migration = true
+enable_early_data = true
+message_queue_capacity = 4096
+EOF
+  else
+    if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
+      echo "[TrustTunnel] ERROR: setup_wizard failed and no certs available." >&2
+      exit 21
+    fi
+
+    echo "[TrustTunnel] setup_wizard failed or timed out with provided cert; retrying with self-signed (REQUIRE_TRUSTTUNNEL_LE=0)..." >&2
+    timeout 60s ./setup_wizard -m non-interactive \
+        -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
+        -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
+        -n "${TRUSTTUNNEL_DOMAIN}" \
+        --lib-settings vpn.toml \
+        --hosts-settings hosts.toml \
+        --cert-type self-signed
+  fi
 fi
 
 cp trusttunnel.service.template /etc/systemd/system/trusttunnel.service
