@@ -87,10 +87,6 @@ cat <<EOF > /etc/sing-box/client-server2.json
       "tag": "direct"
     },
     {
-      "type": "dns",
-      "tag": "dns-out"
-    }
-  ],
   "route": {
     "auto_detect_interface": true,
     "rule_set": [
@@ -110,10 +106,6 @@ cat <<EOF > /etc/sing-box/client-server2.json
       }
     ],
     "rules": [
-      {
-        "protocol": "dns",
-        "outbound": "dns-out"
-      },
       {
         "ip_cidr": [
           "10.0.0.0/8",
