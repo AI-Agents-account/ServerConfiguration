@@ -31,7 +31,7 @@ fi
 
 # Rule sets URLs
 GEOIP_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs"
-GEOSITE_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-ru.srs"
+GEOSITE_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs"
 
 # Rules logic
 if [[ "$TUN_MODE" == "split" ]]; then
