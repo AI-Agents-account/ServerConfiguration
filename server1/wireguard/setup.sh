@@ -74,6 +74,8 @@ main() {
 Address = ${WG_SERVER_IP}
 ListenPort = ${WG_PORT}
 PrivateKey = ${SERVER_PRIV}
+# Bypass sing-box auto_route for WireGuard's own UDP packets
+FwMark = 0x1
 
 # Allow WireGuard handshake
 PostUp = iptables -I INPUT -p udp --dport ${WG_PORT} -j ACCEPT

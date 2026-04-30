@@ -47,7 +47,13 @@ main() {
   /usr/local/bin/sing-box version >/dev/null
 
   mkdir -p /etc/sing-box/
-  log "Installed /usr/local/bin/sing-box and created /etc/sing-box/"
+  mkdir -p /var/lib/sing-box/
+
+  log "Downloading geoip.db and geosite.db..."
+  curl -fL https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db -o /var/lib/sing-box/geoip.db
+  curl -fL https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db -o /var/lib/sing-box/geosite.db
+
+  log "Installed /usr/local/bin/sing-box and updated /var/lib/sing-box/ databases"
 }
 
 main "$@"
