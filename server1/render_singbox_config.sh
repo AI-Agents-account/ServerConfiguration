@@ -85,8 +85,8 @@ cat <<EOF > /etc/sing-box/client-server2.json
     {
       "type": "direct",
       "tag": "direct"
-    },
-    {
+    }
+  ],
   "route": {
     "auto_detect_interface": true,
     "rule_set": [
