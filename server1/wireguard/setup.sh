@@ -134,7 +134,7 @@ EOF
   systemctl enable --now "wg-quick@${WG_IF}"
   systemctl restart "wg-quick@${WG_IF}"
   systemctl enable --now dnsmasq
-  systemctl restart dnsmasq
+  systemctl restart dnsmasq || true
 
   # Client config
   install -d -m 0700 /root/wireguard-clients
