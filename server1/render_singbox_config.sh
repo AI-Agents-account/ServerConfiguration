@@ -106,6 +106,10 @@ cat <<EOF > /etc/sing-box/client-server2.json
     ],
     "rules": [
       {
+        "port": 53,
+        "action": "hijack-dns"
+      },
+      {
         "ip_cidr": [
           "10.0.0.0/8",
           "192.168.0.0/16",
