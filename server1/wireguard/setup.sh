@@ -36,7 +36,7 @@ if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
   fi
 fi
 
-main() {
+require_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "ERROR: run as root (sudo)." >&2
     exit 1
