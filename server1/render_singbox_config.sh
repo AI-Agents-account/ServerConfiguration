@@ -74,7 +74,7 @@ cat <<EOF > /etc/sing-box/client-server2.json
         "172.19.0.1/30"
       ],
       "mtu": 1500,
-      "auto_route": true,
+      "auto_route": false,
       "strict_route": false,
       "stack": "mixed"
     }
