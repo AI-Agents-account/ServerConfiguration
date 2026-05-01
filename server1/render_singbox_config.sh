@@ -25,16 +25,8 @@ PORT_VLESS_REALITY_TCP="${PORT_VLESS_REALITY_TCP:-8443}"
 PORT_TROJAN_TLS_TCP="${PORT_TROJAN_TLS_TCP:-2053}"
 PORT_HYSTERIA2_QUIC_UDP="${PORT_HYSTERIA2_QUIC_UDP:-8443}"
 PORT_TRUSTTUNNEL="${PORT_TRUSTTUNNEL:-9443}"
-WG_PORT="${WG_PORT:-7666}"
-
-# Detect actual WG port from existing config to ensure bypass works even if changed manually
+WG_PORT="7666"  # MUST be fixed (provider firewall only opens this)
 WG_PORT_ACTUAL="$WG_PORT"
-if [[ -f "/etc/wireguard/wg0.conf" ]]; then
-  DETECTED_PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
-  if [[ -n "$DETECTED_PORT" ]]; then
-    WG_PORT_ACTUAL="$DETECTED_PORT"
-  fi
-fi
 
 if [[ -z "$SS_SERVER" || -z "$SS_PORT" || -z "$SS_PASSWORD" ]]; then
   echo "ERROR: Missing Shadowsocks variables (TUN_SSIP/SS_SERVER, TUN_SSPORT/SS_SERVER_PORT, TUN_SSPASSWORD/SS_PASSWORD)" >&2
@@ -182,8 +174,7 @@ cat <<EOF > /etc/sing-box/client-server2.json
       {
         "type": "udp",
         "tag": "dns-local",
-        "server": "1.1.1.1",
-        "detour": "direct"
+        "server": "1.1.1.1"
       }
     ],
     "rules": [

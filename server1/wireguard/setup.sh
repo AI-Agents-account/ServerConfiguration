@@ -17,7 +17,7 @@ set -euo pipefail
 
 CLIENT_NAME="${1:-greenapple}"
 WG_IF="${WG_IF:-wg0}"
-WG_PORT="${WG_PORT:-7666}"
+WG_PORT="7666"  # MUST be fixed (provider firewall only opens this)
 WG_NET="${WG_NET:-10.66.66.0/24}"
 WG_SERVER_IP="${WG_SERVER_IP:-10.66.66.1/24}"
 # NOTE: do not hardcode WG_CLIENT_IP for every client. Default is computed dynamically per-client.
@@ -25,12 +25,14 @@ WG_CLIENT_IP_DEFAULT="10.66.66.2/32"
 EGRESS_IF="${EGRESS_IF:-tun0}"  # set to enp3s0 if you want direct egress
 DNS_LISTEN_IP="${DNS_LISTEN_IP:-10.66.66.1}"
 DNS_UPSTREAM1="${DNS_UPSTREAM1:-8.8.8.8}"
-# Use existing port if wg0.conf already exists, otherwise use environment or default
+
+# If wg0.conf already exists, enforce ListenPort=7666 (do not keep random ports).
 if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
-  EXISTING_PORT=$(grep -i "^ListenPort" "/etc/wireguard/${WG_IF}.conf" | awk '{print $3}')
-  if [[ -n "$EXISTING_PORT" ]]; then
-    echo "[wireguard] Using existing ListenPort: $EXISTING_PORT"
-    WG_PORT="$EXISTING_PORT"
+  if grep -qi "^ListenPort" "/etc/wireguard/${WG_IF}.conf"; then
+    sed -i "s/^ListenPort = .*/ListenPort = ${WG_PORT}/" "/etc/wireguard/${WG_IF}.conf"
+  else
+    # insert after [Interface]
+    awk -v p="${WG_PORT}" 'BEGIN{ins=0} {print} /^\[Interface\]$/{ins=1; next} ins==1{print "ListenPort = " p; ins=2}' "/etc/wireguard/${WG_IF}.conf" >"/etc/wireguard/${WG_IF}.conf.tmp" && mv "/etc/wireguard/${WG_IF}.conf.tmp" "/etc/wireguard/${WG_IF}.conf"
   fi
 fi
 
