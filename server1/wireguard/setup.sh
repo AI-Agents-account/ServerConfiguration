@@ -20,7 +20,8 @@ WG_IF="${WG_IF:-wg0}"
 WG_PORT="${WG_PORT:-7666}"
 WG_NET="${WG_NET:-10.66.66.0/24}"
 WG_SERVER_IP="${WG_SERVER_IP:-10.66.66.1/24}"
-WG_CLIENT_IP="${WG_CLIENT_IP:-10.66.66.2/32}"
+# NOTE: do not hardcode WG_CLIENT_IP for every client. Default is computed dynamically per-client.
+WG_CLIENT_IP_DEFAULT="10.66.66.2/32"
 EGRESS_IF="${EGRESS_IF:-tun0}"  # set to enp3s0 if you want direct egress
 DNS_LISTEN_IP="${DNS_LISTEN_IP:-10.66.66.1}"
 DNS_UPSTREAM1="${DNS_UPSTREAM1:-8.8.8.8}"
@@ -68,8 +69,29 @@ main() {
 
   install -d -m 0700 /etc/wireguard
 
-  # wg0.conf
-  cat >"/etc/wireguard/${WG_IF}.conf" <<EOF
+  # If interface config already exists, we MUST NOT regenerate server keys.
+  if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
+    echo "[wireguard] ${WG_IF}.conf exists; adding a new peer (idempotent)" >&2
+    SERVER_PRIV="$(sudo awk -F' = ' '/^PrivateKey =/ {print $2; exit}' "/etc/wireguard/${WG_IF}.conf")"
+    SERVER_PUB="$(printf "%s" "$SERVER_PRIV" | wg pubkey)"
+    # Pick next free client IP in 10.66.66.0/24 starting from .2
+    USED="$(sudo awk -F' = ' '/^AllowedIPs = 10\.66\.66\./ {print $2}' "/etc/wireguard/${WG_IF}.conf" | cut -d/ -f1 | tr '\n' ' ')"
+    ip=2
+    while echo "$USED" | tr ' ' '\n' | grep -qx "10.66.66.${ip}"; do ip=$((ip+1)); done
+    WG_CLIENT_IP="10.66.66.${ip}/32"
+    # Append new peer
+    cat >>"/etc/wireguard/${WG_IF}.conf" <<EOF
+
+[Peer]
+# Client: ${CLIENT_NAME}
+PublicKey = ${CLIENT_PUB}
+PresharedKey = ${PSK}
+AllowedIPs = ${WG_CLIENT_IP}
+EOF
+  else
+    WG_CLIENT_IP="${WG_CLIENT_IP:-${WG_CLIENT_IP_DEFAULT}}"
+    # wg0.conf (first-time setup)
+    cat >"/etc/wireguard/${WG_IF}.conf" <<EOF
 [Interface]
 Address = ${WG_SERVER_IP}
 ListenPort = ${WG_PORT}
@@ -102,6 +124,7 @@ PublicKey = ${CLIENT_PUB}
 PresharedKey = ${PSK}
 AllowedIPs = ${WG_CLIENT_IP}
 EOF
+  fi
 
   chmod 600 "/etc/wireguard/${WG_IF}.conf"
 
