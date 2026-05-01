@@ -22,12 +22,27 @@ esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Ensure env exists (user requirement): create server1/.env from an example on first run.
+# Never overwrite an existing env file.
+if [[ ! -f "$ENV_FILE" ]]; then
+  EXAMPLE_1="$SCRIPT_DIR/../.env.example"
+  EXAMPLE_2="$SCRIPT_DIR/.env.example"
+  if [[ -f "$EXAMPLE_1" ]]; then
+    echo "[setup] $ENV_FILE not found, creating from $EXAMPLE_1..."
+    cp -n "$EXAMPLE_1" "$ENV_FILE"
+  elif [[ -f "$EXAMPLE_2" ]]; then
+    echo "[setup] $ENV_FILE not found, creating from $EXAMPLE_2..."
+    cp -n "$EXAMPLE_2" "$ENV_FILE"
+  else
+    echo "ERROR: env file not found ($ENV_FILE) and no .env.example available to bootstrap." >&2
+    exit 2
+  fi
+fi
+
 # Load env so ENABLE_SERVER1_PUBLIC_VPN / ENABLE_SERVER1_WIREGUARD (and other vars)
 # affect control flow below.
-if [[ -f "$ENV_FILE" ]]; then
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-fi
+# shellcheck disable=SC1090
+source "$ENV_FILE"
 
 # 0. Install VPN Clients
 bash "$SCRIPT_DIR/install_vpn_clients.sh"
