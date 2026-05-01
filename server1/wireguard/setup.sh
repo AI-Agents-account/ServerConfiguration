@@ -25,9 +25,16 @@ WG_CLIENT_IP_DEFAULT="10.66.66.2/32"
 EGRESS_IF="${EGRESS_IF:-tun0}"  # set to enp3s0 if you want direct egress
 DNS_LISTEN_IP="${DNS_LISTEN_IP:-10.66.66.1}"
 DNS_UPSTREAM1="${DNS_UPSTREAM1:-8.8.8.8}"
-DNS_UPSTREAM2="${DNS_UPSTREAM2:-8.8.4.4}"
+# Use existing port if wg0.conf already exists, otherwise use environment or default
+if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
+  EXISTING_PORT=$(grep -i "^ListenPort" "/etc/wireguard/${WG_IF}.conf" | awk '{print $3}')
+  if [[ -n "$EXISTING_PORT" ]]; then
+    echo "[wireguard] Using existing ListenPort: $EXISTING_PORT"
+    WG_PORT="$EXISTING_PORT"
+  fi
+fi
 
-require_root() {
+main() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "ERROR: run as root (sudo)." >&2
     exit 1

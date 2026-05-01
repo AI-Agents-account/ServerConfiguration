@@ -27,6 +27,7 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2;
 : "${PORT_HYSTERIA2_QUIC_UDP:=8443}"
 : "${PORT_TRUSTTUNNEL:=9443}"
 : "${PORT_NGINX:=8080}"
+: "${WG_PORT:=7666}"
 : "${REALITY_SERVER_NAME:=www.cloudflare.com}"
 : "${REALITY_HANDSHAKE_SERVER:=www.cloudflare.com}"
 : "${REALITY_HANDSHAKE_PORT:=443}"
@@ -54,6 +55,17 @@ ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow "${PORT_PUBLIC}"/tcp
 ufw allow "${PORT_PUBLIC}"/udp
+
+# Also allow WireGuard port if it's already configured or at least its default
+WG_PORT_TO_ALLOW="${WG_PORT:-7666}"
+if [[ -f "/etc/wireguard/wg0.conf" ]]; then
+  DETECTED_WG_PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+  if [[ -n "$DETECTED_WG_PORT" ]]; then
+    WG_PORT_TO_ALLOW="$DETECTED_WG_PORT"
+  fi
+fi
+ufw allow "${WG_PORT_TO_ALLOW}"/udp
+
 ufw --force enable
 
 # fail2ban (sshd)

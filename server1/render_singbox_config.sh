@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# sing-box >=1.13 requires rule-based actions and removes legacy inbound fields.
+# We implement split routing via remote rule-sets (.srs) derived from geoip/geosite.
+
 ENV_FILE="${1:-server1/.env}"
 TUN_MODE="${TUN_MODE:-split}" # Requirements imply split routing
 
@@ -24,6 +27,15 @@ PORT_HYSTERIA2_QUIC_UDP="${PORT_HYSTERIA2_QUIC_UDP:-8443}"
 PORT_TRUSTTUNNEL="${PORT_TRUSTTUNNEL:-9443}"
 WG_PORT="${WG_PORT:-7666}"
 
+# Detect actual WG port from existing config to ensure bypass works even if changed manually
+WG_PORT_ACTUAL="$WG_PORT"
+if [[ -f "/etc/wireguard/wg0.conf" ]]; then
+  DETECTED_PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+  if [[ -n "$DETECTED_PORT" ]]; then
+    WG_PORT_ACTUAL="$DETECTED_PORT"
+  fi
+fi
+
 if [[ -z "$SS_SERVER" || -z "$SS_PORT" || -z "$SS_PASSWORD" ]]; then
   echo "ERROR: Missing Shadowsocks variables (TUN_SSIP/SS_SERVER, TUN_SSPORT/SS_SERVER_PORT, TUN_SSPASSWORD/SS_PASSWORD)" >&2
   exit 1
@@ -35,8 +47,8 @@ GEOSITE_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set
 
 # Rules logic
 if [[ "$TUN_MODE" == "split" ]]; then
-  ROUTE_RULE_RU='{ "rule_set": ["geoip-ru", "geosite-ru"], "outbound": "direct" },'
-  DNS_RULE_RU='{ "rule_set": "geosite-ru", "server": "local" },'
+  ROUTE_RULE_RU='{ "rule_set": ["geoip-ru", "geosite-ru"], "action": "route", "outbound": "direct" },'
+  DNS_RULE_RU='{ "rule_set": ["geosite-ru"], "action": "route", "server": "dns-local" },'
 else
   ROUTE_RULE_RU=""
   DNS_RULE_RU=""
@@ -57,7 +69,8 @@ cat <<EOF > /etc/sing-box/client-server2.json
   "experimental": {
     "cache_file": {
       "enabled": true,
-      "path": "/var/lib/sing-box/cache.db"
+      "path": "/var/lib/sing-box/cache.db",
+      "store_fakeip": true
     }
   },
   "inbounds": [
@@ -65,11 +78,16 @@ cat <<EOF > /etc/sing-box/client-server2.json
       "type": "tun",
       "tag": "tun-in",
       "interface_name": "tun0",
-      "address": "172.19.0.1/30",
+      "address": [
+        "172.19.0.1/30"
+      ],
       "mtu": 1500,
       "auto_route": true,
-      "strict_route": true,
-      "stack": "gvisor"
+      "strict_route": false,
+      "route_table_id": 2022,
+      "routing_mark": 2022,
+      "stack": "mixed",
+      "sniff": true
     }
   ],
   "outbounds": [
@@ -102,9 +120,19 @@ cat <<EOF > /etc/sing-box/client-server2.json
         "format": "binary",
         "url": "$GEOSITE_RU_URL",
         "download_detour": "direct"
+      },
+      {
+        "tag": "geosite-telegram",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
+        "download_detour": "direct"
       }
     ],
     "rules": [
+      {
+        "action": "sniff"
+      },
       {
         "port": 53,
         "action": "hijack-dns"
@@ -119,6 +147,7 @@ cat <<EOF > /etc/sing-box/client-server2.json
           ${EXTRA_DIRECT_IP}
           "169.254.169.0/24"
         ],
+        "action": "route",
         "outbound": "direct"
       },
       {
@@ -128,12 +157,19 @@ cat <<EOF > /etc/sing-box/client-server2.json
           $PORT_TROJAN_TLS_TCP,
           $PORT_HYSTERIA2_QUIC_UDP,
           $PORT_TRUSTTUNNEL,
-          $WG_PORT
+          $WG_PORT_ACTUAL
         ],
+        "action": "route",
         "outbound": "direct"
+      },
+      {
+        "rule_set": ["geosite-telegram"],
+        "action": "route",
+        "outbound": "proxy"
       },
       $ROUTE_RULE_RU
       {
+        "action": "route",
         "outbound": "proxy"
       }
     ]
@@ -141,25 +177,27 @@ cat <<EOF > /etc/sing-box/client-server2.json
   "dns": {
     "servers": [
       {
-        "tag": "google",
-        "address": "8.8.8.8",
+        "type": "udp",
+        "tag": "dns-proxy",
+        "server": "8.8.8.8",
         "detour": "proxy"
       },
       {
-        "tag": "local",
-        "address": "1.1.1.1",
+        "type": "udp",
+        "tag": "dns-local",
+        "server": "1.1.1.1",
         "detour": "direct"
       }
     ],
     "rules": [
       $DNS_RULE_RU
       {
-        "server": "google"
+        "action": "route",
+        "server": "dns-proxy"
       }
-    ],
-    "final": "local"
+    ]
   }
 }
 EOF
 
-echo "[render_singbox_config] Generated /etc/sing-box/client-server2.json (mode=$TUN_MODE, compatible with 1.12+ rule_set)"
+echo "[render_singbox_config] Generated /etc/sing-box/client-server2.json (mode=$TUN_MODE, compatible with 1.13+ rule-based actions)"

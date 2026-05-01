@@ -77,3 +77,21 @@ This file documents real problems encountered during iterative setup and how we 
 - **Sing-box Bypass**: Added explicit `direct` routing rules for detected SSH ports in `render_singbox_config.sh`.
 - **Failsafe**: Added `server1/recovery_connectivity.sh` to allow manual recovery via VNC console.
 - Implemented in PR #33 (commits by Architect sub-agent).
+
+## 8) PR #33 Incident: Split routing not applied & WireGuard handshake fail
+**Symptom**
+- `ip route show table 2022` was empty despite `auto_route: true`.
+- External IP checks (curl ifconfig.me) on server1 returned server1 IP (not server2).
+- WireGuard: sent traffic but no received (handshake failing).
+- Telegram blocked (due to lack of proxy routing).
+
+**Root cause**
+- **Sing-box auto_route failure**: In sing-box 1.13, `auto_route` with `strict_route: true` on some kernels/configurations failed to populate table 2022.
+- **WG Port Mismatch**: WG listened on UDP 55761, but the bypass rule in sing-box and UFW allowance used the default 7666. Response packets were either tunneled incorrectly or blocked by UFW (which was reset by `vpn_install/setup.sh`).
+- **Missing Proxy Path**: Since table 2022 was empty, no traffic from the system (including VLESS server and system shell) was entering the tunnel.
+
+**Fix**
+- **Robust Sing-box config**: Switched to `stack: mixed`, explicit `route_table_id: 2022` and `routing_mark: 2022`, and set `strict_route: false` for better compatibility.
+- **Dynamic WG Port Detection**: Added detection of actual WireGuard port from `/etc/wireguard/wg0.conf` in all relevant scripts (`render_singbox_config.sh`, `wireguard/setup.sh`, `vpn_install/setup.sh`) to ensure consistent bypass and firewall rules.
+- **Explicit Telegram Rules**: Added `geosite-telegram` to proxy rules to guarantee Telegram connectivity.
+- Implemented in PR #33 (May 2024).
