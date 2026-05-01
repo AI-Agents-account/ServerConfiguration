@@ -1,58 +1,99 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# sing-box >=1.13 requires rule-based actions and removes legacy inbound fields.
-# We implement split routing via remote rule-sets (.srs) derived from geoip/geosite.
+# Unified sing-box configuration renderer for server1.
+# Generates /etc/sing-box/vpn-server.json with split-routing and VPN inbounds.
 
+MODE="${TUN_MODE:-split}" # Default to split-routing for all clients
 ENV_FILE="${1:-server1/.env}"
-TUN_MODE="${TUN_MODE:-split}" # Requirements imply split routing
 
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
 fi
 
-# Required variables (defaults or from .env)
+# Shadowsocks Egress (to server2)
 SS_SERVER="${TUN_SSIP:-${SS_SERVER:-}}"
-SS_PORT="${TUN_SSPORT:-${SS_SERVER_PORT:-}}"
+SS_PORT="${TUN_SSPORT:-${SS_SERVER_PORT:-6666}}"
 SS_METHOD="${TUN_SSMETHOD:-${SS_METHOD:-aes-256-gcm}}"
 SS_PASSWORD="${TUN_SSPASSWORD:-${SS_PASSWORD:-}}"
-SERVER1_PUBLIC_IP="${SERVER1_PUBLIC_IP:-}"
 
-# Inbound ports for bypass (to avoid loops and broken replies)
-PORT_PUBLIC="${PORT_PUBLIC:-443}"
-PORT_VLESS_REALITY_TCP="${PORT_VLESS_REALITY_TCP:-8443}"
+# VPN Server Inbounds (Secrets)
+VLESS_UUID="${VLESS_UUID:-$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "de012345-6789-abcd-ef01-23456789abcd")}"
+TROJAN_PASSWORD="${TROJAN_PASSWORD:-$(openssl rand -base64 12 2>/dev/null | tr -d '/+' || echo "trojan-pass")}"
+HYSTERIA2_PASSWORD="${HYSTERIA2_PASSWORD:-$(openssl rand -base64 12 2>/dev/null | tr -d '/+' || echo "hysteria-pass")}"
+
+DOMAIN="${DOMAIN:-example.com}"
+REALITY_SERVER_NAME="${REALITY_SERVER_NAME:-www.google.com}"
+REALITY_HANDSHAKE_SERVER="${REALITY_HANDSHAKE_SERVER:-www.google.com}"
+REALITY_HANDSHAKE_PORT="${REALITY_HANDSHAKE_PORT:-443}"
+REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-}"
+REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(openssl rand -hex 4 2>/dev/null || echo "01234567")}"
+
+PORT_VLESS_REALITY_TCP="${PORT_VLESS_REALITY_TCP:-443}"
 PORT_TROJAN_TLS_TCP="${PORT_TROJAN_TLS_TCP:-2053}"
-PORT_HYSTERIA2_QUIC_UDP="${PORT_HYSTERIA2_QUIC_UDP:-8443}"
-PORT_TRUSTTUNNEL="${PORT_TRUSTTUNNEL:-9443}"
-WG_PORT="7666"  # MUST be fixed (provider firewall only opens this)
-WG_PORT_ACTUAL="$WG_PORT"
+PORT_HYSTERIA2_QUIC_UDP="${PORT_HYSTERIA2_QUIC_UDP:-443}"
 
-if [[ -z "$SS_SERVER" || -z "$SS_PORT" || -z "$SS_PASSWORD" ]]; then
-  echo "ERROR: Missing Shadowsocks variables (TUN_SSIP/SS_SERVER, TUN_SSPORT/SS_SERVER_PORT, TUN_SSPASSWORD/SS_PASSWORD)" >&2
+FULLCHAIN="${FULLCHAIN:-/etc/sing-box/certs/fullchain.pem}"
+PRIVKEY="${PRIVKEY:-/etc/sing-box/certs/privkey.pem}"
+
+SERVER1_PUBLIC_IP="${SERVER1_PUBLIC_IP:-}"
+WG_PORT="${WG_PORT:-7666}"
+
+# Detect SSH port to avoid lockout
+SSH_PORTS_JSON=$(sshd -T 2>/dev/null | grep "^port " | awk '{print $2}' | paste -sd, - || echo 22)
+if [[ -z "$SSH_PORTS_JSON" ]]; then SSH_PORTS_JSON="22"; fi
+
+if [[ -z "$SS_SERVER" || -z "$SS_PASSWORD" ]]; then
+  echo "ERROR: Missing required Shadowsocks variables (TUN_SSIP/TUN_SSPASSWORD)" >&2
   exit 1
 fi
 
-# Rule sets URLs
-GEOIP_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs"
-GEOSITE_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs"
+# Rule-set sources (remote .srs):
+RU_GEOIP_SRS_URL="${RU_GEOIP_SRS_URL:-https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru.srs}"
+RU_GEOSITE_SRS_URL="${RU_GEOSITE_SRS_URL:-https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-category-ru.srs}"
+RU_GOV_GEOSITE_SRS_URL="${RU_GOV_GEOSITE_SRS_URL:-https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-category-gov-ru.srs}"
+TELEGRAM_GEOSITE_SRS_URL="${TELEGRAM_GEOSITE_SRS_URL:-https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-telegram.srs}"
 
-# Rules logic
-if [[ "$TUN_MODE" == "split" ]]; then
-  ROUTE_RULE_RU='{ "rule_set": ["geoip-ru", "geosite-ru"], "action": "route", "outbound": "direct" },'
-  DNS_RULE_RU='{ "rule_set": ["geosite-ru"], "action": "route", "server": "dns-local" },'
-else
-  ROUTE_RULE_RU=""
-  DNS_RULE_RU=""
-fi
-
-# Optional bypass for local public IP
 EXTRA_DIRECT_IP=""
 if [[ -n "$SERVER1_PUBLIC_IP" ]]; then
   EXTRA_DIRECT_IP="\"$SERVER1_PUBLIC_IP/32\","
 fi
 
-cat <<EOF > /etc/sing-box/client-server2.json
+# Routing Rules Logic
+if [[ "$MODE" == "split" ]]; then
+  # Split routing: RU direct, Telegram proxy, else proxy
+  SPLIT_RULES='{
+        "rule_set": ["geosite-telegram"],
+        "action": "route",
+        "outbound": "proxy"
+      },
+      {
+        "rule_set": ["geoip-ru", "geosite-ru", "geosite-gov-ru"],
+        "action": "route",
+        "outbound": "direct"
+      },'
+else
+  # Full routing: All via proxy except local/bypass
+  SPLIT_RULES=""
+fi
+
+# Reality configuration
+REALITY_CONFIG=""
+if [[ -n "$REALITY_PRIVATE_KEY" ]]; then
+  REALITY_CONFIG='{
+          "enabled": true,
+          "handshake": {"server": "'$REALITY_HANDSHAKE_SERVER'", "server_port": '$REALITY_HANDSHAKE_PORT'},
+          "private_key": "'$REALITY_PRIVATE_KEY'",
+          "short_id": ["'$REALITY_SHORT_ID'"]
+        }'
+else
+  REALITY_CONFIG='{"enabled": false}'
+fi
+
+install -d -m 0755 /etc/sing-box
+
+cat > /etc/sing-box/vpn-server.json <<JSON
 {
   "log": {
     "level": "info",
@@ -61,22 +102,64 @@ cat <<EOF > /etc/sing-box/client-server2.json
   "experimental": {
     "cache_file": {
       "enabled": true,
-      "path": "/var/lib/sing-box/cache.db",
+      "path": "cache.db",
       "store_fakeip": true
     }
   },
   "inbounds": [
     {
+      "type": "vless",
+      "tag": "vless-in",
+      "listen": "::",
+      "listen_port": $PORT_VLESS_REALITY_TCP,
+      "users": [{"uuid": "$VLESS_UUID", "flow": "xtls-rprx-vision"}],
+      "tls": {
+        "enabled": true,
+        "server_name": "$REALITY_SERVER_NAME",
+        "alpn": ["h2", "http/1.1"],
+        "reality": $REALITY_CONFIG
+      }
+    },
+    {
+      "type": "trojan",
+      "tag": "trojan-in",
+      "listen": "::",
+      "listen_port": $PORT_TROJAN_TLS_TCP,
+      "users": [{"password": "$TROJAN_PASSWORD"}],
+      "tls": {
+        "enabled": true,
+        "server_name": "$DOMAIN",
+        "alpn": ["h2", "http/1.1"],
+        "certificate_path": "$FULLCHAIN",
+        "key_path": "$PRIVKEY"
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-in",
+      "listen": "::",
+      "listen_port": $PORT_HYSTERIA2_QUIC_UDP,
+      "users": [{"password": "$HYSTERIA2_PASSWORD"}],
+      "tls": {
+        "enabled": true,
+        "server_name": "$DOMAIN",
+        "alpn": ["h3"],
+        "certificate_path": "$FULLCHAIN",
+        "key_path": "$PRIVKEY"
+      }
+    },
+    {
       "type": "tun",
       "tag": "tun-in",
-      "interface_name": "tun0",
+      "interface_name": "sbox-tun",
       "address": [
         "172.19.0.1/30"
       ],
       "mtu": 1500,
-      "auto_route": false,
+      "auto_route": true,
       "strict_route": false,
-      "stack": "mixed"
+      "stack": "system",
+      "route_table_id": 2022
     }
   ],
   "outbounds": [
@@ -91,30 +174,61 @@ cat <<EOF > /etc/sing-box/client-server2.json
     {
       "type": "direct",
       "tag": "direct"
+    },
+    {
+      "type": "dns",
+      "tag": "dns-out"
     }
   ],
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "dns-local",
+        "server": "8.8.8.8",
+        "detour": "direct"
+      }
+    ],
+    "rules": [
+      {
+        "action": "route",
+        "server": "dns-local"
+      }
+    ]
+  },
   "route": {
     "auto_detect_interface": true,
     "rule_set": [
       {
+        "type": "remote",
         "tag": "geoip-ru",
-        "type": "remote",
         "format": "binary",
-        "url": "$GEOIP_RU_URL",
+        "url": "$RU_GEOIP_SRS_URL",
+        "update_interval": "1d",
         "download_detour": "direct"
       },
       {
+        "type": "remote",
         "tag": "geosite-ru",
-        "type": "remote",
         "format": "binary",
-        "url": "$GEOSITE_RU_URL",
+        "url": "$RU_GEOSITE_SRS_URL",
+        "update_interval": "1d",
         "download_detour": "direct"
       },
       {
-        "tag": "geosite-telegram",
         "type": "remote",
+        "tag": "geosite-gov-ru",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
+        "url": "$RU_GOV_GEOSITE_SRS_URL",
+        "update_interval": "1d",
+        "download_detour": "direct"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-telegram",
+        "format": "binary",
+        "url": "$TELEGRAM_GEOSITE_SRS_URL",
+        "update_interval": "1d",
         "download_detour": "direct"
       }
     ],
@@ -123,8 +237,28 @@ cat <<EOF > /etc/sing-box/client-server2.json
         "action": "sniff"
       },
       {
-        "port": 53,
+        "protocol": "dns",
         "action": "hijack-dns"
+      },
+      {
+        "port": 53,
+        "action": "route",
+        "outbound": "dns-out"
+      },
+      {
+        "port": $WG_PORT,
+        "action": "route",
+        "outbound": "direct"
+      },
+      {
+        "port": [$SSH_PORTS_JSON],
+        "action": "route",
+        "outbound": "direct"
+      },
+      {
+        "source_port": [$SSH_PORTS_JSON],
+        "action": "route",
+        "outbound": "direct"
       },
       {
         "ip_cidr": [
@@ -132,6 +266,7 @@ cat <<EOF > /etc/sing-box/client-server2.json
           "192.168.0.0/16",
           "172.16.0.0/12",
           "127.0.0.0/8",
+          "10.66.66.0/24",
           "$SS_SERVER/32",
           ${EXTRA_DIRECT_IP}
           "169.254.169.0/24"
@@ -139,53 +274,14 @@ cat <<EOF > /etc/sing-box/client-server2.json
         "action": "route",
         "outbound": "direct"
       },
-      {
-        "source_port": [
-          $PORT_PUBLIC,
-          $PORT_VLESS_REALITY_TCP,
-          $PORT_TROJAN_TLS_TCP,
-          $PORT_HYSTERIA2_QUIC_UDP,
-          $PORT_TRUSTTUNNEL,
-          $WG_PORT_ACTUAL
-        ],
-        "action": "route",
-        "outbound": "direct"
-      },
-      {
-        "rule_set": ["geosite-telegram"],
-        "action": "route",
-        "outbound": "proxy"
-      },
-      $ROUTE_RULE_RU
+      $SPLIT_RULES
       {
         "action": "route",
         "outbound": "proxy"
-      }
-    ]
-  },
-  "dns": {
-    "servers": [
-      {
-        "type": "udp",
-        "tag": "dns-proxy",
-        "server": "8.8.8.8",
-        "detour": "proxy"
-      },
-      {
-        "type": "udp",
-        "tag": "dns-local",
-        "server": "1.1.1.1"
-      }
-    ],
-    "rules": [
-      $DNS_RULE_RU
-      {
-        "action": "route",
-        "server": "dns-proxy"
       }
     ]
   }
 }
-EOF
+JSON
 
-echo "[render_singbox_config] Generated /etc/sing-box/client-server2.json (mode=$TUN_MODE, compatible with 1.13+ rule-based actions)"
+echo "[render_singbox_config] Generated /etc/sing-box/vpn-server.json (mode=$MODE)"

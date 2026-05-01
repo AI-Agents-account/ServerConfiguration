@@ -1,184 +1,66 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# wireguard/setup.sh
-# Opinionated WireGuard setup for ServerConfiguration environments where the VPS egress may be full-tunneled
-# through a separate interface (e.g. tun0 from tun2socks).
-#
-# Goals:
-# - WireGuard server on UDP :7666 (configurable)
-# - IPv4-only client routing by default (recommended)
-# - Client traffic can egress via a chosen interface (default: tun0)
-# - Provide a stable DNS for clients via dnsmasq on 10.66.66.1 and allow it in UFW on wg0
-#
-# Usage:
-#   sudo bash wireguard/setup.sh [client_name]
-#
+# This script installs WireGuard and configures policy routing to send 
+# its traffic through the unified sing-box VPN server for split-routing.
 
-CLIENT_NAME="${1:-greenapple}"
-WG_IF="${WG_IF:-wg0}"
-WG_PORT="7666"  # MUST be fixed (provider firewall only opens this)
-WG_NET="${WG_NET:-10.66.66.0/24}"
-WG_SERVER_IP="${WG_SERVER_IP:-10.66.66.1/24}"
-# NOTE: do not hardcode WG_CLIENT_IP for every client. Default is computed dynamically per-client.
-WG_CLIENT_IP_DEFAULT="10.66.66.2/32"
-EGRESS_IF="${EGRESS_IF:-tun0}"  # set to enp3s0 if you want direct egress
-# Keep client DNS simple and resilient (no local dnsmasq dependency).
-CLIENT_DNS1="${CLIENT_DNS1:-1.1.1.1}"
-CLIENT_DNS2="${CLIENT_DNS2:-1.0.0.1}"
+ENV_FILE="${1:-server1/wireguard.env}"
 
-# If wg0.conf already exists, enforce ListenPort=7666 (do not keep random ports).
-if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
-  if grep -qi "^ListenPort" "/etc/wireguard/${WG_IF}.conf"; then
-    sed -i "s/^ListenPort = .*/ListenPort = ${WG_PORT}/" "/etc/wireguard/${WG_IF}.conf"
-  else
-    # insert after [Interface]
-    awk -v p="${WG_PORT}" 'BEGIN{ins=0} {print} /^\[Interface\]$/{ins=1; next} ins==1{print "ListenPort = " p; ins=2}' "/etc/wireguard/${WG_IF}.conf" >"/etc/wireguard/${WG_IF}.conf.tmp" && mv "/etc/wireguard/${WG_IF}.conf.tmp" "/etc/wireguard/${WG_IF}.conf"
-  fi
+log() { echo "[wg-setup] $*"; }
+
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
 fi
 
-require_root() {
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "ERROR: run as root (sudo)." >&2
-    exit 1
-  fi
-}
+# 1) Download/Verify angristan script
+INSTALLER="/usr/local/projects/wireguard/wireguard-install.sh"
+if [[ ! -x "$INSTALLER" ]]; then
+  log "Downloading installer..."
+  mkdir -p "$(dirname "$INSTALLER")"
+  curl -fsSL "https://raw.githubusercontent.com/angristan/wireguard-install/master/wireguard-install.sh" -o "$INSTALLER"
+  chmod +x "$INSTALLER"
+fi
 
-need() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing dependency: $1" >&2
-    exit 2
-  }
-}
+# 2) Pre-seed installer answers
+export INTERFACE="${WG_INTERFACE:-wg0}"
+export PORT="${WG_PORT:-7666}"
+export PROTOCOL="${WG_PROTOCOL:-1}" # 1 for UDP
+export EXTERNAL_IP="${SERVER1_PUBLIC_IP:-$(curl -s https://api.ipify.org)}"
+export IP6="${WG_IP6:-n}"
+export DNS1="${WG_DNS1:-10.66.66.1}"
+export DNS2="${WG_DNS2:-8.8.8.8}"
 
-main() {
-  require_root
+if ! command -v wg >/dev/null; then
+    log "Running WireGuard installer..."
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; yes "" | AUTO_INSTALL=y "$INSTALLER"
+else
+    log "WireGuard is already installed."
+fi
 
-  # Dependencies: keep best-effort and avoid hard failing on apt mirror issues.
-  # WireGuard is often already installed by the base image.
-  export DEBIAN_FRONTEND=noninteractive
-  if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
-    apt-get update -y || true
-    apt-get install -y wireguard iptables ca-certificates curl || true
-  fi
+# 3) Post-install: Adjust routing to send wg0 traffic through sing-box TUN
+log "Configuring policy routing for $INTERFACE -> sbox-tun..."
 
-  need wg
-  need wg-quick
-  need ip
-  need iptables
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
-  # Enable IPv4 forwarding
-  sysctl -w net.ipv4.ip_forward=1 >/dev/null
+TABLE_ID=2022
+if ! grep -q "^$TABLE_ID " /etc/iproute2/rt_tables 2>/dev/null; then
+    echo "$TABLE_ID vpn-split" >> /etc/iproute2/rt_tables || true
+fi
 
-  # Detect public IP for client endpoint (best-effort)
-  SERVER_PUBLIC_IP="$(ip -4 addr show | awk '/inet / && $2 !~ /^127\./ {print $2}' | cut -d/ -f1 | head -n1)"
+ip rule del iif "$INTERFACE" table $TABLE_ID 2>/dev/null || true
+ip rule add iif "$INTERFACE" table $TABLE_ID
 
-  # Keys
-  umask 077
-  SERVER_PRIV="$(wg genkey)"
-  SERVER_PUB="$(printf "%s" "$SERVER_PRIV" | wg pubkey)"
-  CLIENT_PRIV="$(wg genkey)"
-  CLIENT_PUB="$(printf "%s" "$CLIENT_PRIV" | wg pubkey)"
-  PSK="$(wg genpsk)"
+if ip link show sbox-tun >/dev/null 2>&1; then
+    ip route replace default dev sbox-tun table $TABLE_ID
+    log "Route added: default via sbox-tun in table $TABLE_ID"
+else
+    log "Warning: sbox-tun not found. Route to table $TABLE_ID will be added by sing-box on start."
+fi
 
-  install -d -m 0700 /etc/wireguard
+# Firewall
+iptables -C FORWARD -i "$INTERFACE" -o sbox-tun -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "$INTERFACE" -o sbox-tun -j ACCEPT
+iptables -C FORWARD -i sbox-tun -o "$INTERFACE" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+  iptables -A FORWARD -i sbox-tun -o "$INTERFACE" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-  # If interface config already exists, we MUST NOT regenerate server keys.
-  if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
-    echo "[wireguard] ${WG_IF}.conf exists; adding a new peer (idempotent)" >&2
-    SERVER_PRIV="$(sudo awk -F' = ' '/^PrivateKey =/ {print $2; exit}' "/etc/wireguard/${WG_IF}.conf")"
-    SERVER_PUB="$(printf "%s" "$SERVER_PRIV" | wg pubkey)"
-    # Pick next free client IP in 10.66.66.0/24 starting from .2
-    USED="$(sudo awk -F' = ' '/^AllowedIPs = 10\.66\.66\./ {print $2}' "/etc/wireguard/${WG_IF}.conf" | cut -d/ -f1 | tr '\n' ' ')"
-    ip=2
-    while echo "$USED" | tr ' ' '\n' | grep -qx "10.66.66.${ip}"; do ip=$((ip+1)); done
-    WG_CLIENT_IP="10.66.66.${ip}/32"
-    # Append new peer
-    cat >>"/etc/wireguard/${WG_IF}.conf" <<EOF
-
-[Peer]
-# Client: ${CLIENT_NAME}
-PublicKey = ${CLIENT_PUB}
-PresharedKey = ${PSK}
-AllowedIPs = ${WG_CLIENT_IP}
-EOF
-  else
-    WG_CLIENT_IP="${WG_CLIENT_IP:-${WG_CLIENT_IP_DEFAULT}}"
-    # wg0.conf (first-time setup)
-    cat >"/etc/wireguard/${WG_IF}.conf" <<EOF
-[Interface]
-Address = ${WG_SERVER_IP}
-ListenPort = ${WG_PORT}
-PrivateKey = ${SERVER_PRIV}
-# Bypass sing-box auto_route for WireGuard's own UDP packets
-FwMark = 0x1
-
-# Allow WireGuard handshake
-PostUp = iptables -I INPUT -p udp --dport ${WG_PORT} -j ACCEPT
-
-# Forwarding rules
-PostUp = iptables -I FORWARD -i ${WG_IF} -j ACCEPT
-PostUp = iptables -I FORWARD -i ${EGRESS_IF} -o ${WG_IF} -j ACCEPT
-
-# NAT client subnet out via EGRESS_IF (tun0 for "through tunnel" mode)
-PostUp = iptables -t nat -A POSTROUTING -s ${WG_NET} -o ${EGRESS_IF} -j MASQUERADE
-
-# MTU/fragmentation helper for TCP
-PostUp = iptables -t mangle -A FORWARD -i ${WG_IF} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-
-PostDown = iptables -D INPUT -p udp --dport ${WG_PORT} -j ACCEPT
-PostDown = iptables -D FORWARD -i ${WG_IF} -j ACCEPT
-PostDown = iptables -D FORWARD -i ${EGRESS_IF} -o ${WG_IF} -j ACCEPT
-PostDown = iptables -t nat -D POSTROUTING -s ${WG_NET} -o ${EGRESS_IF} -j MASQUERADE
-PostDown = iptables -t mangle -D FORWARD -i ${WG_IF} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-
-[Peer]
-# Client: ${CLIENT_NAME}
-PublicKey = ${CLIENT_PUB}
-PresharedKey = ${PSK}
-AllowedIPs = ${WG_CLIENT_IP}
-EOF
-  fi
-
-  chmod 600 "/etc/wireguard/${WG_IF}.conf"
-
-  # UFW rules (best-effort; if ufw is not installed, skip)
-  if command -v ufw >/dev/null 2>&1; then
-    ufw allow "${WG_PORT}/udp" || true
-    ufw --force enable || true
-  fi
-
-  systemctl enable --now "wg-quick@${WG_IF}"
-  systemctl restart "wg-quick@${WG_IF}"
-  # Client config
-  install -d -m 0700 /root/wireguard-clients
-  CLIENT_PATH="/root/wireguard-clients/${WG_IF}-client-${CLIENT_NAME}.conf"
-  cat >"${CLIENT_PATH}" <<EOF
-[Interface]
-PrivateKey = ${CLIENT_PRIV}
-Address = ${WG_CLIENT_IP}
-DNS = ${CLIENT_DNS1},${CLIENT_DNS2}
-
-# Recommended on mobile networks:
-# PersistentKeepalive = 25
-# MTU = 1280
-
-[Peer]
-PublicKey = ${SERVER_PUB}
-PresharedKey = ${PSK}
-Endpoint = ${SERVER_PUBLIC_IP}:${WG_PORT}
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
-EOF
-
-  chmod 600 "${CLIENT_PATH}"
-
-  echo "========================================================="
-  echo "✅ WireGuard configured."
-  echo "Interface: ${WG_IF} (UDP:${WG_PORT})"
-  echo "Egress interface for clients: ${EGRESS_IF}"
-  echo "Client config: ${CLIENT_PATH}"
-  echo "========================================================="
-}
-
-main "$@"
+log "WireGuard setup completed."

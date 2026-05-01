@@ -78,20 +78,17 @@ This file documents real problems encountered during iterative setup and how we 
 - **Failsafe**: Added `server1/recovery_connectivity.sh` to allow manual recovery via VNC console.
 - Implemented in PR #33 (commits by Architect sub-agent).
 
-## 8) PR #33 Incident: Split routing not applied & WireGuard handshake fail
+## 9) Split-routing must apply to ALL VPN clients (WireGuard + VLESS/Trojan/etc.)
 **Symptom**
-- `ip route show table 2022` was empty despite `auto_route: true`.
-- External IP checks (curl ifconfig.me) on server1 returned server1 IP (not server2).
-- WireGuard: sent traffic but no received (handshake failing).
-- Telegram blocked (due to lack of proxy routing).
+- WireGuard clients were split-routed, but VLESS/Trojan/Hysteria2 clients still used server1's local IP for all traffic (full tunnel via server1 WAN, no proxy via server2).
+- Ru-blocked sites (Telegram, etc.) worked on WG but failed on VLESS.
 
 **Root cause**
-- **Sing-box auto_route failure**: In sing-box 1.13, `auto_route` with `strict_route: true` on some kernels/configurations failed to populate table 2022.
-- **WG Port Mismatch**: WG listened on UDP 55761, but the bypass rule in sing-box and UFW allowance used the default 7666. Response packets were either tunneled incorrectly or blocked by UFW (which was reset by `vpn_install/setup.sh`).
-- **Missing Proxy Path**: Since table 2022 was empty, no traffic from the system (including VLESS server and system shell) was entering the tunnel.
+- **Kernel vs App routing**: VLESS/Trojan traffic is originated by the `sing-box-vpn` process itself. System-level policy routing (table 2022) does not affect traffic originating from a local process unless specifically marked or bound to a tunnel interface.
+- Previous approach relied on policy routing for `wg0` interface into `tun0`, which didn't touch app-level VPN traffic.
 
 **Fix**
-- **Robust Sing-box config**: Switched to `stack: mixed`, explicit `route_table_id: 2022` and `routing_mark: 2022`, and set `strict_route: false` for better compatibility.
-- **Dynamic WG Port Detection**: Added detection of actual WireGuard port from `/etc/wireguard/wg0.conf` in all relevant scripts (`render_singbox_config.sh`, `wireguard/setup.sh`, `vpn_install/setup.sh`) to ensure consistent bypass and firewall rules.
-- **Explicit Telegram Rules**: Added `geosite-telegram` to proxy rules to guarantee Telegram connectivity.
-- Implemented in PR #33 (May 2024).
+- **Unified config**: Merged VPN inbounds (VLESS/Trojan/Hysteria2) and Egress logic (Shadowsocks proxy to server2) into a single sing-box configuration (`vpn-server.json`).
+- **In-app routing**: Implemented split-routing rules *inside* sing-box. This ensures that any packet arriving via VLESS or other inbounds is subjected to the same `direct` (RU) vs `proxy` (Foreign) rules before leaving the process.
+- **WireGuard Integration**: Routed `wg0` traffic into a sing-box TUN inbound (`sbox-tun`) via policy routing, so it also benefits from the same in-app split-routing logic.
+- Implemented in PR #33 (May 2024, Architecture Update).
