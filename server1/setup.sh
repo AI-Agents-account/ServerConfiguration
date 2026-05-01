@@ -25,8 +25,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Ensure env exists (user requirement): create server1/.env from an example on first run.
 # Never overwrite an existing env file.
 if [[ ! -f "$ENV_FILE" ]]; then
-  EXAMPLE_1="$SCRIPT_DIR/../.env.example"
-  EXAMPLE_2="$SCRIPT_DIR/.env.example"
+  EXAMPLE_1="$SCRIPT_DIR/.env.example"
+  EXAMPLE_2="$SCRIPT_DIR/../.env.example"
   if [[ -f "$EXAMPLE_1" ]]; then
     echo "[setup] $ENV_FILE not found, creating from $EXAMPLE_1..."
     cp -n "$EXAMPLE_1" "$ENV_FILE"
