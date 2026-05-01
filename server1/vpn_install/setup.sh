@@ -333,24 +333,36 @@ systemctl daemon-reload || true
 systemctl enable trusttunnel || true
 systemctl restart trusttunnel || true
 
-# sing-box config
+# sing-box config (vpn-server)
+# Requirement: split-routing must apply to ALL VPN clients (WireGuard + Public VPN).
+# For Public VPN, routing is implemented INSIDE sing-box using rule_sets:
+# - RU -> direct
+# - Telegram + all non-RU -> proxy (Shadowsocks to server2)
 install -d -m 0755 /etc/sing-box
+
+# Shadowsocks (server2) vars from server1/.env
+SS_SERVER="${TUN_SSIP:-${SS_SERVER:-}}"
+SS_PORT="${TUN_SSPORT:-${SS_SERVER_PORT:-}}"
+SS_METHOD="${TUN_SSMETHOD:-${SS_METHOD:-chacha20-ietf-poly1305}}"
+SS_PASSWORD="${TUN_SSPASSWORD:-${SS_PASSWORD:-}}"
+if [[ -z "${SS_SERVER}" || -z "${SS_PORT}" || -z "${SS_PASSWORD}" ]]; then
+  echo "ERROR: Missing Shadowsocks variables for split routing (TUN_SSIP/TUN_SSPORT/TUN_SSPASSWORD)" >&2
+  exit 6
+fi
+
+GEOIP_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs"
+GEOSITE_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs"
+GEOSITE_TG_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs"
+
 cat >/etc/sing-box/vpn-server.json <<EOF
 {
-  "log": {"level": "info"},
+  "log": {"level": "info", "timestamp": true},
   "inbounds": [
-    {
-      "type": "direct",
-      "tag": "tcp-mux",
-      "listen": "::",
-      "listen_port": ${PORT_PUBLIC},
-      "network": "tcp"
-    },
     {
       "type": "vless",
       "tag": "vless-reality",
-      "listen": "127.0.0.1",
-      "listen_port": ${PORT_VLESS_REALITY_TCP},
+      "listen": "::",
+      "listen_port": 443,
       "users": [{"uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision"}],
       "tls": {
         "enabled": true,
@@ -367,8 +379,8 @@ cat >/etc/sing-box/vpn-server.json <<EOF
     {
       "type": "trojan",
       "tag": "trojan-tls",
-      "listen": "127.0.0.1",
-      "listen_port": ${PORT_TROJAN_TLS_TCP},
+      "listen": "::",
+      "listen_port": 2053,
       "users": [{"password": "${TROJAN_PASSWORD}"}],
       "tls": {
         "enabled": true,
@@ -378,47 +390,57 @@ cat >/etc/sing-box/vpn-server.json <<EOF
         "key_path": "${PRIVKEY}"
       }
     },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2",
+      "listen": "::",
+      "listen_port": 443,
+      "users": [{"name": "admin", "password": "${HYSTERIA2_PASSWORD}"}],
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": ["h3"],
+        "certificate_path": "${FULLCHAIN}",
+        "key_path": "${PRIVKEY}"
+      }
+    }
   ],
-  "outbounds": [{"type": "direct", "tag": "direct"}],
+  "outbounds": [
+    {"type": "direct", "tag": "direct"},
+    {
+      "type": "shadowsocks",
+      "tag": "proxy",
+      "server": "${SS_SERVER}",
+      "server_port": ${SS_PORT},
+      "method": "${SS_METHOD}",
+      "password": "${SS_PASSWORD}"
+    }
+  ],
   "route": {
-    "rules": [
-      {
-        "inbound": ["tcp-mux"],
-        "action": "sniff"
-      },
-      {
-        "inbound": "tcp-mux",
-        "domain": ["${REALITY_SERVER_NAME}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_VLESS_REALITY_TCP}
-      },
-      {
-        "inbound": "tcp-mux",
-        "domain": ["${DOMAIN}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_TROJAN_TLS_TCP}
-      },
-      {
-        "inbound": "tcp-mux",
-        "domain": ["${TRUSTTUNNEL_DOMAIN}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_TRUSTTUNNEL}
-      },
-      {
-        "inbound": "tcp-mux",
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_NGINX}
-      },
+    "auto_detect_interface": true,
+    "rule_set": [
+      {"tag": "geoip-ru", "type": "remote", "format": "binary", "url": "${GEOIP_RU_URL}", "download_detour": "direct"},
+      {"tag": "geosite-ru", "type": "remote", "format": "binary", "url": "${GEOSITE_RU_URL}", "download_detour": "direct"},
+      {"tag": "geosite-telegram", "type": "remote", "format": "binary", "url": "${GEOSITE_TG_URL}", "download_detour": "direct"}
     ],
-    "final": "direct"
+    "rules": [
+      {"protocol": "dns", "action": "hijack-dns"},
+
+      {"ip_cidr": ["10.0.0.0/8","192.168.0.0/16","172.16.0.0/12","127.0.0.0/8","169.254.0.0/16"], "action": "route", "outbound": "direct"},
+      {"ip_cidr": ["${SS_SERVER}/32"], "action": "route", "outbound": "direct"},
+
+      {"rule_set": ["geosite-telegram"], "action": "route", "outbound": "proxy"},
+      {"rule_set": ["geoip-ru", "geosite-ru"], "action": "route", "outbound": "direct"},
+
+      {"action": "route", "outbound": "proxy"}
+    ]
+  },
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "dns-direct", "server": "1.1.1.1"},
+      {"type": "udp", "tag": "dns-proxy", "server": "8.8.8.8", "detour": "proxy"}
+    ],
+    "final": "dns-direct"
   }
 }
 EOF

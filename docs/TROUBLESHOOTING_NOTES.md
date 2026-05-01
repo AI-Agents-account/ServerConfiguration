@@ -70,13 +70,37 @@ This file documents real problems encountered during iterative setup and how we 
 
 **Root cause**
 - **UFW sequence**: `vpn_install/setup.sh` performed `ufw reset` followed by a hardcoded `ufw allow 22/tcp`. On servers with custom SSH ports, this blocked access.
-- **Asymmetric routing**: `sing-box` with `auto_route: true` and `strict_route: true` captured outbound SSH response packets and routed them into `tun0` (proxy), breaking the TCP handshake from the client's perspective (source IP mismatch).
+- **Asymmetric routing**: `sing-box` with aggressive routing captured outbound SSH response packets and routed them into the tunnel, breaking TCP due to asymmetric routing.
 
 **Fix**
-- **Dynamic SSH detection**: Added `sshd -T` check to both UFW setup and sing-box config generation to whitelist all active SSH ports.
-- **Sing-box Bypass**: Added explicit `direct` routing rules for detected SSH ports in `render_singbox_config.sh`.
-- **Failsafe**: Added `server1/recovery_connectivity.sh` to allow manual recovery via VNC console.
-- Implemented in PR #33 (commits by Architect sub-agent).
+- **Dynamic SSH detection**: Detect active SSH ports via `sshd -T` and whitelist in UFW.
+- Add explicit `direct` routing for SSH ports to keep control plane stable.
+- **Failsafe**: `server1/recovery_connectivity.sh`.
+
+## 8) WG port drift (random port) caused handshake failure
+**Symptom**
+- WireGuard client shows `sent` only, no `received`/no handshake.
+
+**Root cause**
+- WireGuard ended up listening on a random port (e.g., 55761) while provider firewall only allowed UDP 7666.
+
+**Fix**
+- Enforce fixed WireGuard port: **UDP 7666** everywhere (server config, client config, docs).
+
+## 9) Split-routing must apply to ALL VPN clients (WG + Public VPN)
+**Symptom**
+- WireGuard behaves one way, but VLESS/Trojan/Hysteria2/TrustTunnel behave differently.
+- RU services and Telegram may break depending on which client type is used.
+
+**Root cause**
+- Kernel policy routing based on `iif wg0` only affects WireGuard clients. Public VPN clients terminate in `sing-box-vpn` and then originate new connections from server1, so they bypass `iif wg0` rules.
+
+**Fix**
+- Implement split-routing inside **sing-box-vpn** (`/etc/sing-box/vpn-server.json`):
+  - RU -> `direct`
+  - Telegram + non-RU -> `proxy` (Shadowsocks to server2)
+- Keep WireGuard split via policy routing (wg0 -> table 2022 -> tun0).
+- Add/maintain E2E checklist: `docs/E2E_CHECKLIST.md`.
 
 ## 9) Split-routing must apply to ALL VPN clients (WireGuard + VLESS/Trojan/etc.)
 **Symptom**
