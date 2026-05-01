@@ -144,6 +144,19 @@ CERT_PATH="/etc/letsencrypt/live/${DOMAIN}"
 FULLCHAIN="${CERT_PATH}/fullchain.pem"
 PRIVKEY="${CERT_PATH}/privkey.pem"
 
+# Preflight: if using Let's Encrypt, ensure DNS points to this server.
+# This avoids confusing failures where certbot reports connection refused on a different IP.
+if [[ "${ENABLE_LETSENCRYPT}" == "1" ]]; then
+  SERVER_IP_GUESS="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  for d in "${DOMAIN}" "${TRUSTTUNNEL_DOMAIN}"; do
+    a="$(dig +short A "$d" | tail -n 1 || true)"
+    if [[ -n "$SERVER_IP_GUESS" && -n "$a" && "$a" != "$SERVER_IP_GUESS" ]]; then
+      echo "ERROR: DNS A record for $d points to $a but this server IP is $SERVER_IP_GUESS. Fix DNS and re-run." >&2
+      exit 11
+    fi
+  done
+fi
+
 if [[ "${ENABLE_LETSENCRYPT}" == "1" ]]; then
   apt-get install -y certbot
   if [[ ! -f "${FULLCHAIN}" || ! -f "${PRIVKEY}" ]]; then
