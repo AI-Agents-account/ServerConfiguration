@@ -84,8 +84,6 @@ cat <<EOF > /etc/sing-box/client-server2.json
       "mtu": 1500,
       "auto_route": true,
       "strict_route": false,
-      "route_table_id": 2022,
-      "routing_mark": 2022,
       "stack": "mixed",
       "sniff": true
     }
