@@ -63,6 +63,17 @@ This file documents real problems encountered during iterative setup and how we 
 **Fix**
 - Ensure install flow creates `server1/.env` from `.env.example` (or fails fast with a clear error). This is required for clean-from-scratch server rebuilds.
 
-## 6) Operational notes
-- GitHub access from the server was intermittently blocked; to unblock progress we used SCP to deliver the repo state when needed.
-- Apt mirrors sometimes flapped (IPv6/HTTP issues). Prefer stable mirrors and ensure IPv6 policy aligns with your split strategy.
+## 7) SSH Lockout during setup (PR #33)
+**Symptom**
+- SSH connection drops and times out immediately after running `setup.sh`.
+- Server becomes unreachable via port 22 (or custom SSH port).
+
+**Root cause**
+- **UFW sequence**: `vpn_install/setup.sh` performed `ufw reset` followed by a hardcoded `ufw allow 22/tcp`. On servers with custom SSH ports, this blocked access.
+- **Asymmetric routing**: `sing-box` with `auto_route: true` and `strict_route: true` captured outbound SSH response packets and routed them into `tun0` (proxy), breaking the TCP handshake from the client's perspective (source IP mismatch).
+
+**Fix**
+- **Dynamic SSH detection**: Added `sshd -T` check to both UFW setup and sing-box config generation to whitelist all active SSH ports.
+- **Sing-box Bypass**: Added explicit `direct` routing rules for detected SSH ports in `render_singbox_config.sh`.
+- **Failsafe**: Added `server1/recovery_connectivity.sh` to allow manual recovery via VNC console.
+- Implemented in PR #33 (commits by Architect sub-agent).
