@@ -88,14 +88,10 @@ systemctl disable tun2socks-server2.service sslocal-server2.service 2>/dev/null 
 # 5. Restart sing-box
 systemctl restart sing-box-server2.service
 
-# 5.1 Prevent routing loop to server2 IP when sing-box auto_route installs policy routing.
-# sing-box creates table 2022 by default; ensure server2 (Shadowsocks) destination stays reachable via WAN.
-if [[ -n "${TUN_SSIP:-}" ]]; then
-  gw="$(ip route show default | awk '/default/ {print $3; exit}')"
-  iface="$(ip route show default | awk '/default/ {for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
-  if [[ -n "$gw" && -n "$iface" ]]; then
-    ip route replace "${TUN_SSIP}/32" via "$gw" dev "$iface" table 2022 2>/dev/null || true
-  fi
+# 5.1 Apply routing policy for WireGuard clients (wg0 -> table 2022 -> tun0).
+# This avoids routing the whole host through the tunnel and prevents direct-outbound loops.
+if [[ -f "$SCRIPT_DIR/apply_split_routing.sh" ]]; then
+  bash "$SCRIPT_DIR/apply_split_routing.sh" || true
 fi
 
 # 6. Optional: VPN & WireGuard Server setup
