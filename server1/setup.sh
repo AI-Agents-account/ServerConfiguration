@@ -54,6 +54,8 @@ bash "$SCRIPT_DIR/install_singbox.sh"
 TUN_MODE="$MODE" bash "$SCRIPT_DIR/render_singbox_config.sh" "$ENV_FILE"
 
 # 3. Create/Update Systemd Service
+# sing-box service expects its working directory to exist.
+install -d -m 0755 /var/lib/sing-box
 cat <<EOF > /etc/systemd/system/sing-box-server2.service
 [Unit]
 Description=sing-box Service
