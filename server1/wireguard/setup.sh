@@ -23,8 +23,9 @@ WG_SERVER_IP="${WG_SERVER_IP:-10.66.66.1/24}"
 # NOTE: do not hardcode WG_CLIENT_IP for every client. Default is computed dynamically per-client.
 WG_CLIENT_IP_DEFAULT="10.66.66.2/32"
 EGRESS_IF="${EGRESS_IF:-tun0}"  # set to enp3s0 if you want direct egress
-DNS_LISTEN_IP="${DNS_LISTEN_IP:-10.66.66.1}"
-DNS_UPSTREAM1="${DNS_UPSTREAM1:-8.8.8.8}"
+# Keep client DNS simple and resilient (no local dnsmasq dependency).
+CLIENT_DNS1="${CLIENT_DNS1:-1.1.1.1}"
+CLIENT_DNS2="${CLIENT_DNS2:-1.0.0.1}"
 
 # If wg0.conf already exists, enforce ListenPort=7666 (do not keep random ports).
 if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
@@ -53,9 +54,13 @@ need() {
 main() {
   require_root
 
+  # Dependencies: keep best-effort and avoid hard failing on apt mirror issues.
+  # WireGuard is often already installed by the base image.
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y
-  apt-get install -y wireguard iptables dnsmasq ca-certificates curl
+  if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
+    apt-get update -y || true
+    apt-get install -y wireguard iptables ca-certificates curl || true
+  fi
 
   need wg
   need wg-quick
@@ -137,37 +142,14 @@ EOF
 
   chmod 600 "/etc/wireguard/${WG_IF}.conf"
 
-  # dnsmasq: stable DNS for WG clients (avoid UDP DNS reliability issues through full-tunnel)
-  cat >/etc/dnsmasq.d/${WG_IF}.conf <<EOF
-# WireGuard DNS for clients
-interface=${WG_IF}
-listen-address=${DNS_LISTEN_IP}
-bind-interfaces
-port=53
-
-no-resolv
-server=${DNS_UPSTREAM1}
-server=${DNS_UPSTREAM2}
-
-domain-needed
-bogus-priv
-EOF
-
-
   # UFW rules (best-effort; if ufw is not installed, skip)
   if command -v ufw >/dev/null 2>&1; then
     ufw allow "${WG_PORT}/udp" || true
-    # Allow DNS to server over wg interface
-    ufw allow in on ${WG_IF} to any port 53 proto udp || true
-    ufw allow in on ${WG_IF} to any port 53 proto tcp || true
     ufw --force enable || true
   fi
 
   systemctl enable --now "wg-quick@${WG_IF}"
   systemctl restart "wg-quick@${WG_IF}"
-  systemctl enable --now dnsmasq
-  systemctl restart dnsmasq || true
-
   # Client config
   install -d -m 0700 /root/wireguard-clients
   CLIENT_PATH="/root/wireguard-clients/${WG_IF}-client-${CLIENT_NAME}.conf"
@@ -175,7 +157,7 @@ EOF
 [Interface]
 PrivateKey = ${CLIENT_PRIV}
 Address = ${WG_CLIENT_IP}
-DNS = ${DNS_LISTEN_IP}
+DNS = ${CLIENT_DNS1},${CLIENT_DNS2}
 
 # Recommended on mobile networks:
 # PersistentKeepalive = 25
