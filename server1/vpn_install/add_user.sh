@@ -43,7 +43,7 @@ jq --arg uuid "$NEW_VLESS_UUID" \
     ( .inbounds[] | select(.tag == "hysteria2") | .users ) += [{"name": $h2_name, "password": $h2_pass}]' \
    "$SINGBOX_CONFIG" > /tmp/config.json.tmp && mv /tmp/config.json.tmp "$SINGBOX_CONFIG"
 
-systemctl restart sing-box
+systemctl restart sing-box-vpn
 
 echo "Adding user '${USERNAME}' to TrustTunnel..."
 TT_CRED_FILE="/opt/trusttunnel/credentials.toml"
