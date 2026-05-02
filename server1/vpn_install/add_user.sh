@@ -38,9 +38,9 @@ jq --arg uuid "$NEW_VLESS_UUID" \
    --arg trojan_pass "$NEW_TROJAN_PASSWORD" \
    --arg h2_name "$USERNAME" \
    --arg h2_pass "$NEW_HYSTERIA2_PASSWORD" \
-   '( .inbounds[] | select(.tag == "vless-reality") | .users ) += [{"uuid": $uuid, "flow": "xtls-rprx-vision"}] |
-    ( .inbounds[] | select(.tag == "trojan-tls") | .users ) += [{"password": $trojan_pass}] |
-    ( .inbounds[] | select(.tag == "hysteria2") | .users ) += [{"name": $h2_name, "password": $h2_pass}]' \
+   '( .inbounds[] | select(.type == "vless") | .users ) += [{"uuid": $uuid, "flow": "xtls-rprx-vision"}] |
+    ( .inbounds[] | select(.type == "trojan") | .users ) += [{"password": $trojan_pass}] |
+    ( .inbounds[] | select(.type == "hysteria2") | .users ) += [{"name": $h2_name, "password": $h2_pass}]' \
    "$SINGBOX_CONFIG" > /tmp/config.json.tmp && mv /tmp/config.json.tmp "$SINGBOX_CONFIG"
 
 systemctl restart sing-box-vpn
