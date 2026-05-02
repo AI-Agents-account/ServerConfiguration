@@ -67,7 +67,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now sing-box-vpn.service
+# Do not start sing-box yet: in Public VPN mode certificates may be generated later (vpn_install).
+systemctl enable sing-box-vpn.service
 
 # 4. Cleanup old services
 systemctl stop sing-box-server2.service tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
@@ -84,5 +85,9 @@ if [[ "${ENABLE_SERVER1_WIREGUARD:-0}" == "1" ]]; then
   echo "[setup] Installing WireGuard Server..."
   bash "$SCRIPT_DIR/wireguard/setup.sh" "mobile-client"
 fi
+
+# Now that optional components (including cert issuance) are installed, start/restart sing-box.
+echo "[setup] Starting sing-box-vpn.service..."
+systemctl restart sing-box-vpn.service
 
 echo "[setup] Done: mode=$MODE env=$ENV_FILE. sing-box-vpn.service is running."

@@ -174,8 +174,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
     {
       "type": "direct",
       "tag": "direct"
-    },
-    
+    }
   ],
   "dns": {
     "servers": [
