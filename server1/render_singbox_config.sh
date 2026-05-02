@@ -101,9 +101,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
   },
   "experimental": {
     "cache_file": {
-      "enabled": true,
-      "path": "cache.db",
-      "store_fakeip": true
+      "enabled": false
     }
   },
   "inbounds": [
