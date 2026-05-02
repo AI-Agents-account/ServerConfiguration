@@ -470,6 +470,7 @@ After=network.target
 User=singbox
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/vpn-server.json
 Restart=on-failure
 LimitNOFILE=65535
