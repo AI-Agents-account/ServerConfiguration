@@ -17,6 +17,8 @@
 sudo bash wireguard/setup.sh greenapple
 ```
 
+По умолчанию скрипт (и в целом пакет) подразумевает, что WireGuard слушает **только UDP :7666**.
+
 По умолчанию скрипт:
 - создаёт `/etc/wireguard/wg0.conf`
 - поднимает `wg-quick@wg0`
