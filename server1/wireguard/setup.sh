@@ -24,8 +24,9 @@ fi
 
 # 2) Pre-seed installer answers
 export INTERFACE="${WG_INTERFACE:-wg0}"
-export PORT="${WG_PORT:-7666}"
-export PROTOCOL="${WG_PROTOCOL:-1}" # 1 for UDP
+# Hard requirement: WireGuard must ALWAYS listen on UDP 7666
+export PORT="7666"
+export PROTOCOL="1" # UDP (hard-pinned)
 export EXTERNAL_IP="${SERVER1_PUBLIC_IP:-$(curl -s https://api.ipify.org)}"
 export IP6="${WG_IP6:-n}"
 export DNS1="${WG_DNS1:-10.66.66.1}"
