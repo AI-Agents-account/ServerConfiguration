@@ -182,7 +182,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
         "type": "udp",
         "tag": "dns-local",
         "server": "8.8.8.8",
-        "detour": "direct"
+        "detour": "proxy"
       }
     ],
     "rules": [
@@ -201,7 +201,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
         "format": "binary",
         "url": "$RU_GEOIP_SRS_URL",
         "update_interval": "1d",
-        "download_detour": "direct"
+        "download_detour": "proxy"
       },
       {
         "type": "remote",
@@ -209,7 +209,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
         "format": "binary",
         "url": "$RU_GEOSITE_SRS_URL",
         "update_interval": "1d",
-        "download_detour": "direct"
+        "download_detour": "proxy"
       },
       {
         "type": "remote",
@@ -217,7 +217,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
         "format": "binary",
         "url": "$RU_GOV_GEOSITE_SRS_URL",
         "update_interval": "1d",
-        "download_detour": "direct"
+        "download_detour": "proxy"
       },
       {
         "type": "remote",
@@ -225,7 +225,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
         "format": "binary",
         "url": "$TELEGRAM_GEOSITE_SRS_URL",
         "update_interval": "1d",
-        "download_detour": "direct"
+        "download_detour": "proxy"
       }
     ],
     "rules": [
