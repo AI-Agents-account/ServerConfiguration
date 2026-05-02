@@ -33,7 +33,7 @@ export DNS2="${WG_DNS2:-8.8.8.8}"
 
 if ! command -v wg >/dev/null; then
     log "Running WireGuard installer..."
-    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; yes "" | AUTO_INSTALL=y "$INSTALLER"
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; echo -e "\n\n\n\n\n\n\n\n\nmobile-client\n1\n\n\n" | "$INSTALLER"
 else
     log "WireGuard is already installed."
 fi

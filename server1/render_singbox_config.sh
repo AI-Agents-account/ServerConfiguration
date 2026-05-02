@@ -133,20 +133,6 @@ cat > /etc/sing-box/vpn-server.json <<JSON
       }
     },
     {
-      "type": "hysteria2",
-      "tag": "hysteria2-in",
-      "listen": "::",
-      "listen_port": $PORT_HYSTERIA2_QUIC_UDP,
-      "users": [{"password": "$HYSTERIA2_PASSWORD"}],
-      "tls": {
-        "enabled": true,
-        "server_name": "$DOMAIN",
-        "alpn": ["h3"],
-        "certificate_path": "$FULLCHAIN",
-        "key_path": "$PRIVKEY"
-      }
-    },
-    {
       "type": "tun",
       "tag": "tun-in",
       "interface_name": "sbox-tun",
