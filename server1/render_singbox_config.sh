@@ -158,9 +158,9 @@ cat > /etc/sing-box/vpn-server.json <<JSON
       "mtu": 1500,
       "auto_route": true,
       "strict_route": false,
-      "stack": "system",
-      "route_table_id": 2022
+      "stack": "system"
     }
+
   ],
   "outbounds": [
     {
@@ -175,10 +175,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
       "type": "direct",
       "tag": "direct"
     },
-    {
-      "type": "dns",
-      "tag": "dns-out"
-    }
+    
   ],
   "dns": {
     "servers": [
@@ -240,11 +237,7 @@ cat > /etc/sing-box/vpn-server.json <<JSON
         "protocol": "dns",
         "action": "hijack-dns"
       },
-      {
-        "port": 53,
-        "action": "route",
-        "outbound": "dns-out"
-      },
+      
       {
         "port": $WG_PORT,
         "action": "route",
