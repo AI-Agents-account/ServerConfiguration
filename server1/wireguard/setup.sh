@@ -18,7 +18,7 @@ INSTALLER="/usr/local/projects/wireguard/wireguard-install.sh"
 if [[ ! -x "$INSTALLER" ]]; then
   log "Downloading installer..."
   mkdir -p "$(dirname "$INSTALLER")"
-  curl -fsSL "https://raw.githubusercontent.com/angristan/wireguard-install/master/wireguard-install.sh" -o "$INSTALLER"
+  curl -fsSL "https://raw.githubusercontent.com/Nyr/wireguard-install/master/wireguard-install.sh" -o "$INSTALLER"
   chmod +x "$INSTALLER"
 fi
 
