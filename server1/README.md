@@ -47,7 +47,16 @@ ENABLE_SERVER1_WIREGUARD=1
 DOMAIN="vpn.example.com"
 TRUSTTUNNEL_DOMAIN="tt.example.com"
 EMAIL="admin@example.com"
+
+# Reality SNI (default: www.yandex.ru)
+REALITY_SERVER_NAME="www.yandex.ru"
 ```
+
+### Настройка эндпоинта и Reality SNI
+
+В `.env` можно переопределить:
+- `SERVER1_PUBLIC_IP` — если не задано, ссылки будут генерироваться с использованием `DOMAIN`. Если `DOMAIN` тоже не задан, скрипт попытается определить IP автоматически через основную таблицу маршрутизации (чтобы не попасть на IP второго сервера через туннель).
+- `REALITY_SERVER_NAME` / `REALITY_HANDSHAKE_SERVER` — домен, под который маскируется VLESS Reality. По умолчанию `www.yandex.ru`. Рекомендуется использовать популярные российские домены для маскировки под локальный трафик.
 
 ---
 

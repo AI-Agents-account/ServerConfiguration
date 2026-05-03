@@ -28,8 +28,8 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2;
 : "${PORT_TRUSTTUNNEL:=9443}"
 : "${PORT_NGINX:=8080}"
 : "${WG_PORT:=7666}"
-: "${REALITY_SERVER_NAME:=www.cloudflare.com}"
-: "${REALITY_HANDSHAKE_SERVER:=www.cloudflare.com}"
+: "${REALITY_SERVER_NAME:=www.yandex.ru}"
+: "${REALITY_HANDSHAKE_SERVER:=www.yandex.ru}"
 : "${REALITY_HANDSHAKE_PORT:=443}"
 : "${SINGBOX_USER:=singbox}"
 
@@ -506,13 +506,18 @@ systemctl disable hysteria 2>/dev/null || true
 
 # Save settings for add_user_new.sh
 # Detect the VPS public IPv4 bypassing potential tunnels.
+# Priority: 1. SERVER1_PUBLIC_IP, 2. DOMAIN (preferred for links), 3. Auto-detection via main routing table.
 if [[ -n "${SERVER1_PUBLIC_IP:-}" ]]; then
   SERVER_IP="${SERVER1_PUBLIC_IP}"
+elif [[ -n "${DOMAIN:-}" ]]; then
+  SERVER_IP="${DOMAIN}"
 else
-  # Try to detect public IP bypassing potential tunnels
-  SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
-  if [[ -z "$SERVER_IP" || "$SERVER_IP" =~ ^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\.|^198\.(1[8-9])\. ]]; then
-     SERVER_IP=$(curl -s4 --interface "$(ip route get 1.1.1.1 | awk '/dev/ {print $5}')" https://api.ipify.org || curl -s4 https://api.ipify.org || echo "YOUR_SERVER_IP")
+  # Detect public IP using the default interface of the main routing table to bypass tunnels (e.g. from server1 to server2)
+  WAN_IF=$(ip -4 route show table main default | awk '{print $5; exit}')
+  if [[ -n "$WAN_IF" ]]; then
+    SERVER_IP=$(curl -s4 --interface "$WAN_IF" https://api.ipify.org || curl -s4 https://api.ipify.org || echo "YOUR_SERVER_IP")
+  else
+    SERVER_IP=$(curl -s4 https://api.ipify.org || echo "YOUR_SERVER_IP")
   fi
 fi
 cat >/etc/vpn_settings.env <<ENV_EOF

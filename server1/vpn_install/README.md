@@ -73,6 +73,17 @@ sudo bash vpn_install/add_user.sh <username> vpn_install/.env
 - Исходники клиента: https://github.com/sagernet/sing-box
 - Релизы (скачать клиент под разные устройства): https://github.com/SagerNet/sing-box/releases
 
+### TrustTunnel: Ручной импорт (iOS/Android)
+Если мобильный клиент не импортирует deeplink или QR-код, используйте ручную настройку. 
+Все необходимые данные находятся на сервере в файле: `/root/vpn_clients/<username>/trusttunnel_manual.json`.
+
+Поля для ручного ввода в мобильном приложении (соответствие полям в JSON):
+- **Address**: Публичный IP-адрес или домен сервера (поле `address`).
+- **Server Name (SNI)**: Домен из сертификата (поле `domain_name_from_server_cert`).
+- **User/Password**: Ваши учетные данные (`username`, `password`).
+- **DNS**: Рекомендуется 1.1.1.1 или 8.8.8.8 (поле `dns_server_addresses`).
+- **Certificate**: Содержимое поля `self_signed_certificate` (полная цепочка PEM).
+
 ## Шаблоны клиентов (vpn_install/clients)
 
 В `vpn_install/clients/` лежат **только актуальные** шаблоны:
