@@ -19,10 +19,15 @@ fi
 VPN_INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATES_DIR="${VPN_INSTALL_DIR}/clients"
 
-SINGBOX_CONFIG="/etc/sing-box/config.json"
+SINGBOX_CONFIG="/etc/sing-box/vpn-server.json"
 if [[ ! -f "$SINGBOX_CONFIG" ]]; then
-  echo "Error: $SINGBOX_CONFIG not found. Is sing-box installed via setup.sh?" >&2
-  exit 1
+  # Fallback to generic config name if vpn-server.json is missing
+  if [[ -f "/etc/sing-box/config.json" ]]; then
+    SINGBOX_CONFIG="/etc/sing-box/config.json"
+  else
+    echo "Error: sing-box config not found in /etc/sing-box/" >&2
+    exit 1
+  fi
 fi
 
 # Generate new secrets
@@ -31,30 +36,39 @@ NEW_TROJAN_PASSWORD="$(openssl rand -base64 12 | tr -d '=+/\n' | head -c 16)"
 NEW_HYSTERIA2_PASSWORD="$(openssl rand -base64 12 | tr -d '=+/\n' | head -c 16)"
 NEW_TT_PASSWORD="$(openssl rand -base64 12 | tr -d '=+/\n' | head -c 16)"
 
-echo "Adding user '${USERNAME}' to sing-box (VLESS, Trojan, Hysteria2)..."
+echo "Checking if user '${USERNAME}' already exists..."
+if jq -e --arg name "$USERNAME" '.inbounds[] | select(.type == "hysteria2") | .users[] | select(.name == $name)' "$SINGBOX_CONFIG" >/dev/null; then
+  echo "User '${USERNAME}' already exists in sing-box config. Skipping config update."
+else
+  echo "Adding user '${USERNAME}' to sing-box (VLESS, Trojan, Hysteria2)..."
 
-# Safely update sing-box config
-jq --arg uuid "$NEW_VLESS_UUID" \
-   --arg trojan_pass "$NEW_TROJAN_PASSWORD" \
-   --arg h2_name "$USERNAME" \
-   --arg h2_pass "$NEW_HYSTERIA2_PASSWORD" \
-   '( .inbounds[] | select(.type == "vless") | .users ) += [{"uuid": $uuid, "flow": "xtls-rprx-vision"}] |
-    ( .inbounds[] | select(.type == "trojan") | .users ) += [{"password": $trojan_pass}] |
-    ( .inbounds[] | select(.type == "hysteria2") | .users ) += [{"name": $h2_name, "password": $h2_pass}]' \
-   "$SINGBOX_CONFIG" > /tmp/config.json.tmp && mv /tmp/config.json.tmp "$SINGBOX_CONFIG"
+  # Safely update sing-box config
+  jq --arg uuid "$NEW_VLESS_UUID" \
+     --arg trojan_pass "$NEW_TROJAN_PASSWORD" \
+     --arg h2_name "$USERNAME" \
+     --arg h2_pass "$NEW_HYSTERIA2_PASSWORD" \
+     '( .inbounds[] | select(.type == "vless") | .users ) += [{"uuid": $uuid, "flow": "xtls-rprx-vision"}] |
+      ( .inbounds[] | select(.type == "trojan") | .users ) += [{"password": $trojan_pass}] |
+      ( .inbounds[] | select(.type == "hysteria2") | .users ) += [{"name": $h2_name, "password": $h2_pass}]' \
+     "$SINGBOX_CONFIG" > /tmp/config.json.tmp && mv /tmp/config.json.tmp "$SINGBOX_CONFIG"
 
-systemctl restart sing-box-vpn
+  systemctl restart sing-box-vpn
+fi
 
 echo "Adding user '${USERNAME}' to TrustTunnel..."
 TT_CRED_FILE="/opt/trusttunnel/credentials.toml"
 if [[ -f "$TT_CRED_FILE" ]]; then
-  cat >> "$TT_CRED_FILE" <<INNER_EOF
+  if grep -q "username = \"${USERNAME}\"" "$TT_CRED_FILE"; then
+     echo "User '${USERNAME}' already exists in TrustTunnel credentials. Skipping."
+  else
+    cat >> "$TT_CRED_FILE" <<INNER_EOF
 
 [[client]]
 username = "${USERNAME}"
 password = "${NEW_TT_PASSWORD}"
 INNER_EOF
-  systemctl restart trusttunnel
+    systemctl restart trusttunnel
+  fi
 else
   echo "Warning: TrustTunnel credentials file not found at $TT_CRED_FILE. Skipping TrustTunnel user addition."
 fi

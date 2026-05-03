@@ -68,9 +68,17 @@ EOF
 
 # Add OS route for server2 explicitly to bypass loop
 if [[ -n "$TUN_SSIP" ]]; then
-  DEFAULT_GW=$(ip route show default | awk '/default/ {print $3}' | head -n1)
-  if [[ -n "$DEFAULT_GW" ]]; then
-    ip route add "$TUN_SSIP/32" via "$DEFAULT_GW" 2>/dev/null || true
+  # Resolve hostname to IP if needed
+  SS_IP="$TUN_SSIP"
+  if [[ ! "$SS_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    SS_IP=$(getent hosts "$TUN_SSIP" | awk '{print $1}' | head -n1 || echo "")
+  fi
+
+  if [[ -n "$SS_IP" ]]; then
+    DEFAULT_GW=$(ip route show default | awk '/default/ {print $3}' | head -n1)
+    if [[ -n "$DEFAULT_GW" ]]; then
+      ip route replace "$SS_IP/32" via "$DEFAULT_GW" 2>/dev/null || true
+    fi
   fi
 fi
 
@@ -84,12 +92,29 @@ if ! grep -q "^$TABLE_ID " /etc/iproute2/rt_tables 2>/dev/null; then
     echo "$TABLE_ID vpn-split" >> /etc/iproute2/rt_tables || true
 fi
 ip route replace default dev tun0 table $TABLE_ID 2>/dev/null || true
-# Keep DNS queries outside the tunnel to avoid resolver lock-ups
-ip rule del pref 8000 2>/dev/null || true
-ip rule add pref 8000 not from all dport 53 lookup main suppress_prefixlength 0 2>/dev/null || true
 
+# Policy Rules (ordered by priority/pref)
+# 1. SSH Protection: Always allow SSH in/out via main table
+ip rule del pref 10 2>/dev/null || true
+ip rule add pref 10 dport 22 lookup main 2>/dev/null || true
+ip rule del pref 11 2>/dev/null || true
+ip rule add pref 11 sport 22 lookup main 2>/dev/null || true
+
+# 2. Local DNS bypass (avoid loops with systemd-resolved)
+ip rule del pref 8000 2>/dev/null || true
+ip rule add pref 8000 dport 53 lookup main 2>/dev/null || true
+
+# 3. Mark 0xff (255) bypass: sing-box direct outbound/proxy traffic
+ip rule del pref 8001 2>/dev/null || true
+ip rule add pref 8001 fwmark 255 lookup main 2>/dev/null || true
+
+# 4. Main table suppression: ignore default route in 'main', fall through to 2022
+ip rule del pref 9000 2>/dev/null || true
+ip rule add pref 9000 lookup main suppress_prefixlength 0 2>/dev/null || true
+
+# 5. Catch-all for suppressed/remaining: route to tun0
 ip rule del pref 9001 2>/dev/null || true
-ip rule add pref 9001 lookup $TABLE_ID
+ip rule add pref 9001 lookup $TABLE_ID 2>/dev/null || true
 
 # 4. Cleanup legacy services (tun2socks / sslocal)
 systemctl stop tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true

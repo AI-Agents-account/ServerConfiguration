@@ -63,7 +63,8 @@ cat > /etc/sing-box/client-server2.json <<JSON
   "outbounds": [
     {
       "type": "direct",
-      "tag": "direct"
+      "tag": "direct",
+      "routing_mark": 255
     },
     {
       "type": "shadowsocks",
@@ -71,7 +72,8 @@ cat > /etc/sing-box/client-server2.json <<JSON
       "server": "$SS_SERVER",
       "server_port": $SS_PORT,
       "method": "$SS_METHOD",
-      "password": "$SS_PASSWORD"
+      "password": "$SS_PASSWORD",
+      "routing_mark": 255
     }
   ],
   "route": {

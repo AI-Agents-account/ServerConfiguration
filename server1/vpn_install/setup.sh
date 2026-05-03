@@ -419,22 +419,23 @@ cat >/etc/sing-box/vpn-server.json <<EOF
     }
   ],
   "outbounds": [
-    {"type": "direct", "tag": "direct"},
+    {"type": "direct", "tag": "direct", "routing_mark": 255},
     {
       "type": "shadowsocks",
       "tag": "proxy",
       "server": "${SS_SERVER}",
       "server_port": ${SS_PORT},
       "method": "${SS_METHOD}",
-      "password": "${SS_PASSWORD}"
+      "password": "${SS_PASSWORD}",
+      "routing_mark": 255
     }
   ],
   "route": {
     "auto_detect_interface": true,
     "rule_set": [
-      {"tag": "geoip-ru", "type": "remote", "format": "binary", "url": "${GEOIP_RU_URL}", "download_detour": "direct"},
-      {"tag": "geosite-ru", "type": "remote", "format": "binary", "url": "${GEOSITE_RU_URL}", "download_detour": "direct"},
-      {"tag": "geosite-telegram", "type": "remote", "format": "binary", "url": "${GEOSITE_TG_URL}", "download_detour": "direct"}
+      {"tag": "geoip-ru", "type": "remote", "format": "binary", "url": "${GEOIP_RU_URL}", "download_detour": "proxy"},
+      {"tag": "geosite-ru", "type": "remote", "format": "binary", "url": "${GEOSITE_RU_URL}", "download_detour": "proxy"},
+      {"tag": "geosite-telegram", "type": "remote", "format": "binary", "url": "${GEOSITE_TG_URL}", "download_detour": "proxy"}
     ],
     "rules": [
       {"protocol": "dns", "action": "hijack-dns"},
