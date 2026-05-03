@@ -116,3 +116,17 @@ This file documents real problems encountered during iterative setup and how we 
 - **In-app routing**: Implemented split-routing rules *inside* sing-box. This ensures that any packet arriving via VLESS or other inbounds is subjected to the same `direct` (RU) vs `proxy` (Foreign) rules before leaving the process.
 - **WireGuard Integration**: Routed `wg0` traffic into a sing-box TUN inbound (`sbox-tun`) via policy routing, so it also benefits from the same in-app split-routing logic.
 - Implemented in PR #33 (May 2024, Architecture Update).
+
+## 10) sing-box 1.13.6 failed due to unknown 'dns' inbound
+**Symptom**
+- `sing-box-vpn.service` status: `failed`.
+- Logs: `FATAL decode config at /etc/sing-box/vpn-server.json: inbounds[0]: unknown inbound type: dns`.
+- VLESS/Trojan/Hy2/WireGuard connectivity lost (443 and 7666 not responding properly).
+
+**Root cause**
+- Commit `c6bdcd6` added an inbound of type `dns` to `vpn-server.json`. This feature is not supported in the installed version of sing-box (1.13.6).
+
+**Fix**
+- Removed the `dns` inbound from `vpn-server.json`.
+- Since the server-side local DNS resolver was removed, updated WireGuard client configs to use public DNS (1.1.1.1, 8.8.8.8) instead of trying to reach `10.66.66.1:53`.
+- Commits: `00ae242`.
