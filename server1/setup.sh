@@ -62,7 +62,7 @@ Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true"
 ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 # Prevent systemd-resolved from using the tunnel for global DNS resolution to avoid loops.
-ExecStartPost=/bin/sh -c 'sleep 3; /usr/bin/resolvectl dns $TUN_DEV "" || true; /usr/bin/resolvectl domain $TUN_DEV "" || true; /usr/bin/resolvectl default-route $TUN_DEV false || true'
+ExecStartPost=/bin/sh -c 'sleep 3; /usr/bin/resolvectl dns $TUN_DEV "" || true; /usr/bin/resolvectl domain $TUN_DEV "" || true; /usr/bin/resolvectl default-route $TUN_DEV false || true; ip route replace default dev $TUN_DEV table 2022 || true'
 Restart=always
 RestartSec=3
 LimitNOFILE=infinity
