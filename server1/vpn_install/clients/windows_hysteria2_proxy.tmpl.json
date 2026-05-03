@@ -13,7 +13,8 @@
       "tls": {
         "enabled": true,
         "server_name": "__TLS_SNI__",
-        "alpn": ["h3"]
+        "alpn": ["h3"],
+        "insecure": true
       }
     }
   ],

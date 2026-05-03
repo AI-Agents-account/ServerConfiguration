@@ -14,7 +14,8 @@
         "enabled": true,
         "server_name": "__TLS_SNI__",
         "alpn": ["h2", "http/1.1"],
-        "utls": {"enabled": true, "fingerprint": "chrome"}
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "insecure": true
       }
     }
   ],
