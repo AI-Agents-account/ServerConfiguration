@@ -55,6 +55,7 @@ ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow "${PORT_PUBLIC}"/tcp
 ufw allow "${PORT_PUBLIC}"/udp
+ufw allow "${PORT_TROJAN_TLS_TCP}"/tcp
 
 # Also allow WireGuard port if it's already configured or at least its default
 WG_PORT_TO_ALLOW="${WG_PORT:-7666}"

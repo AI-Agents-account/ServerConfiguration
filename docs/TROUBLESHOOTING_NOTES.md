@@ -147,3 +147,15 @@ This file documents real problems encountered during iterative setup and how we 
 - **SAN Certs**: Updated `openssl` call in `setup.sh` to include `-addext "subjectAltName = DNS:${DOMAIN},DNS:${TRUSTTUNNEL_DOMAIN}"`.
 - **Key Sync**: Switched to `sing-box generate reality-keypair` and ensured both keys are saved to `/etc/vpn_settings.env`.
 - **Insecure Fallback**: Set `insecure: true` for self-signed Trojan/Hy2 client profiles.
+
+## 12) Trojan port (2053) blocked by UFW
+**Symptom**
+- Trojan client fails to connect with "connection timed out" or "connection refused".
+- VLESS (443) and Hysteria2 (443 UDP) work fine on the same server.
+
+**Root cause**
+- Trojan listens on its own TCP port (default 2053) to avoid conflicts with VLESS/Reality on 443. However, `vpn_install/setup.sh` only allowed 22, 80, 443, and 7666.
+
+**Fix**
+- Added `ufw allow "${PORT_TROJAN_TLS_TCP}"/tcp` to `server1/vpn_install/setup.sh`.
+- Ensure clients are using the correct port in their Trojan links (e.g., `:2053`).
