@@ -55,8 +55,8 @@ cat > /etc/sing-box/client-server2.json <<JSON
       "interface_name": "$TUN_IFACE",
       "address": ["$TUN_ADDR"],
       "mtu": $TUN_MTU,
-      "auto_route": true,
-      "strict_route": true,
+      "auto_route": false,
+      "strict_route": false,
       "stack": "system"
     }
   ],

@@ -57,10 +57,6 @@ CapabilityBoundingSet=CAP_NET_ADMIN
 Environment="ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
 ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
-# sing-box TUN auto_route may register DNS on tun0; keep system DNS on uplink
-ExecStartPost=/usr/bin/resolvectl default-route tun0 no
-ExecStartPost=/usr/bin/resolvectl dns tun0 8.8.8.8 8.8.4.4
-ExecStartPost=/usr/bin/resolvectl domain tun0 ""
 Restart=always
 RestartSec=3
 LimitNOFILE=infinity
@@ -72,11 +68,21 @@ EOF
 systemctl daemon-reload
 systemctl enable --now sing-box-server2.service
 
-# 3. Cleanup legacy services (tun2socks / sslocal)
+# 3. Apply routing for local processes (manual bypass of auto_route issues)
+# Traffic from localhost to NON-RU -> table 2022
+TABLE_ID=2022
+if ! grep -q "^$TABLE_ID " /etc/iproute2/rt_tables 2>/dev/null; then
+    echo "$TABLE_ID vpn-split" >> /etc/iproute2/rt_tables || true
+fi
+ip route replace default dev tun0 table $TABLE_ID 2>/dev/null || true
+ip rule del pref 9001 2>/dev/null || true
+ip rule add pref 9001 lookup $TABLE_ID suppress_prefixlength 0
+
+# 4. Cleanup legacy services (tun2socks / sslocal)
 systemctl stop tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
 systemctl disable tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
 
-# 4. Optional: Public VPN bundle + WireGuard server
+# 5. Optional: Public VPN bundle + WireGuard server
 # VPN must be installed BEFORE WireGuard as it performs 'ufw reset'
 if [[ "${ENABLE_SERVER1_PUBLIC_VPN:-0}" == "1" ]]; then
   echo "[setup] Installing Public VPN bundle (server1/vpn_install)..."
