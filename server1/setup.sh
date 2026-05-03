@@ -103,10 +103,12 @@ ip rule add pref 11 sport 22 lookup main 2>/dev/null || true
 # 2. Local DNS bypass (avoid loops with systemd-resolved)
 ip rule del pref 8000 2>/dev/null || true
 ip rule add pref 8000 dport 53 lookup main 2>/dev/null || true
+ip rule del pref 8001 2>/dev/null || true
+ip rule add pref 8001 sport 53 lookup main 2>/dev/null || true
 
 # 3. Mark 0xff (255) bypass: sing-box direct outbound/proxy traffic
-ip rule del pref 8001 2>/dev/null || true
-ip rule add pref 8001 fwmark 255 lookup main 2>/dev/null || true
+ip rule del pref 8002 2>/dev/null || true
+ip rule add pref 8002 fwmark 255 lookup main 2>/dev/null || true
 
 # 4. Main table suppression: ignore default route in 'main', fall through to 2022
 ip rule del pref 9000 2>/dev/null || true
