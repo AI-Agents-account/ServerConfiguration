@@ -1,0 +1,22 @@
+[Unit]
+Description=WireGuard RU Split Routing Persistence
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash -c '\
+  ipset create ru_cidrs hash:net -! ; \
+  iptables -t mangle -C PREROUTING -i wg0 -m set --match-set ru_cidrs dst -j MARK --set-mark 0x1 2>/dev/null || \
+  iptables -t mangle -A PREROUTING -i wg0 -m set --match-set ru_cidrs dst -j MARK --set-mark 0x1; \
+  ip rule add pref 9999 fwmark 0x1 lookup main 2>/dev/null || true; \
+  ip rule add iif wg0 pref 10000 lookup vpn-split 2>/dev/null || true; \
+  iptables -t nat -C POSTROUTING -s 10.66.66.0/24 -o enp3s0 -m mark --mark 0x1 -j MASQUERADE 2>/dev/null || \
+  iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o enp3s0 -m mark --mark 0x1 -j MASQUERADE; \
+  iptables -t nat -C POSTROUTING -s 10.66.66.0/24 -o tun0 ! --mark 0x1 -j MASQUERADE 2>/dev/null || \
+  iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o tun0 ! --mark 0x1 -j MASQUERADE; \
+  ip rule del pref 9001 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target

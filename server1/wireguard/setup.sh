@@ -114,7 +114,13 @@ fi
 
 # Policy routing for split routing: traffic arriving from wg0 goes to table 2022 default via tun0
 log "Applying split-routing policy for WireGuard: iif ${INTERFACE} -> ${TUN_DEV}"
-WG_IF="${INTERFACE}" TUN_DEV="${TUN_DEV}" bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/apply_split_routing.sh"
+if [[ -f "$(dirname "${BASH_SOURCE[0]}")/setup_split_routing.sh" ]]; then
+    log "Using ipset-based split routing (setup_split_routing.sh)"
+    bash "$(dirname "${BASH_SOURCE[0]}")/setup_split_routing.sh"
+else
+    log "Using basic split routing (apply_split_routing.sh)"
+    WG_IF="${INTERFACE}" TUN_DEV="${TUN_DEV}" bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/apply_split_routing.sh"
+fi
 
 # QR
 qrencode -o "$CLIENT_DIR/${CLIENT_NAME}.png" -t png < "$CLIENT_DIR/${CLIENT_NAME}.conf"

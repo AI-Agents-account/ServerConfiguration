@@ -46,3 +46,13 @@ The global "catch-all" for the tunnel now uses a two-step process:
 - **SAN Certificate Support**: Updated self-signed certificate generation to include `subjectAltName` (SAN). This fixes the `x509: certificate relies on legacy Common Name field` error in modern Hysteria2 and Trojan clients.
 - **Reality Key Synchronization**: Switched to `sing-box generate reality-keypair` for generating VLESS Reality keys. Both Private and Public keys are now explicitly stored and synchronized between server configuration and client links, preventing "reality verification failed" errors.
 - **Insecure Fallback in Clients**: Added `insecure: true` to Trojan and Hysteria2 client configurations as a robust fallback for self-signed certificates.
+
+### 3.7 WireGuard Split-Routing (ipset-based)
+To provide a more granular split for WireGuard clients (specifically bypassing Russian traffic), an ipset-based solution was integrated:
+- **`update-ru-ipset.sh`**: A script that downloads the RU IP zone from `ipdeny.com` and populates an ipset named `ru_cidrs`.
+- **`setup_split_routing.sh`**: Configures the following:
+    - **Marking**: Traffic from `wg0` destined for IPs in `ru_cidrs` is marked with `0x1`.
+    - **Policy Routing**: A high-priority rule (`pref 9999`) sends marked traffic to the `main` table (direct egress).
+    - **Conditional NAT**: Different MASQUERADE rules for marked (WAN) and unmarked (Tunnel) traffic.
+    - **Persistence**: A systemd service (`wg-split-routing.service`) ensures rules are re-applied on boot, and a timer (`wg-split-routing-update.timer`) keeps the ipset updated daily.
+- **Integration**: `server1/wireguard/setup.sh` now automatically detects and applies this split-routing configuration if present.
