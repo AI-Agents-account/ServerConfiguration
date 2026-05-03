@@ -57,6 +57,10 @@ CapabilityBoundingSet=CAP_NET_ADMIN
 Environment="ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
 ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
+# sing-box TUN auto_route may register DNS on tun0; keep system DNS on uplink
+ExecStartPost=/usr/bin/resolvectl default-route tun0 no
+ExecStartPost=/usr/bin/resolvectl dns tun0 8.8.8.8 8.8.4.4
+ExecStartPost=/usr/bin/resolvectl domain tun0 ""
 Restart=always
 RestartSec=3
 LimitNOFILE=infinity
