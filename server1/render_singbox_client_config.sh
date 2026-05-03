@@ -74,6 +74,15 @@ cat > /etc/sing-box/client-server2.json <<JSON
       "password": "$SS_PASSWORD"
     }
   ],
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "dns-direct", "server": "1.1.1.1", "detour": "direct"},
+      {"type": "udp", "tag": "dns-direct-2", "server": "8.8.8.8", "detour": "direct"}
+    ],
+    "rules": [
+      {"action": "route", "server": "dns-direct"}
+    ]
+  },
   "route": {
     "auto_detect_interface": true,
     "rule_set": [
@@ -83,8 +92,6 @@ cat > /etc/sing-box/client-server2.json <<JSON
       {"type": "remote", "tag": "geosite-telegram", "format": "binary", "url": "$TELEGRAM_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "direct"}
     ],
     "rules": [
-      {"protocol": "dns", "action": "hijack-dns"},
-
       {"ip_cidr": ["10.0.0.0/8","192.168.0.0/16","172.16.0.0/12","127.0.0.0/8","169.254.0.0/16"], "action": "route", "outbound": "direct"},
       {"ip_cidr": ["$SS_SERVER/32"], "action": "route", "outbound": "direct"},
 
