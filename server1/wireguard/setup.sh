@@ -52,6 +52,10 @@ else
 fi
 log "Using Server Public IP: ${SERVER_PUBLIC_IP}"
 
+# Detect WAN interface (outbound)
+WAN_IFACE=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \K\S+' || echo "eth0")
+log "Detected WAN interface: ${WAN_IFACE}"
+
 # Client keys (idempotent)
 CLIENT_DIR="/root/wireguard-clients/${CLIENT_NAME}"
 mkdir -p "$CLIENT_DIR"
@@ -73,9 +77,9 @@ Address = ${WG_SERVER_IP}
 ListenPort = ${WG_PORT}
 PrivateKey = ${SERVER_PRIV}
 
-# Basic forwarding
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# NAT and Forwarding
+PostUp = iptables -t nat -A POSTROUTING -s ${WG_NET} -o ${WAN_IFACE} -j MASQUERADE; iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -s ${WG_NET} -o ${WAN_IFACE} -j MASQUERADE; iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 [Peer]
 PublicKey = ${CLIENT_PUB}
@@ -100,6 +104,13 @@ chmod 600 "$CLIENT_DIR/${CLIENT_NAME}.conf"
 
 log "Starting wg-quick@${INTERFACE}..."
 systemctl enable --now wg-quick@${INTERFACE}
+
+# Ensure UFW allows routing if active
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+  log "Configuring UFW route rules for WireGuard..."
+  ufw route allow in on "${INTERFACE}" out on "${WAN_IFACE}" 2>/dev/null || true
+  ufw route allow in on "${WAN_IFACE}" out on "${INTERFACE}" 2>/dev/null || true
+fi
 
 # Policy routing for split routing: traffic arriving from wg0 goes to table 2022 default via tun0
 log "Applying split-routing policy for WireGuard: iif ${INTERFACE} -> ${TUN_DEV}"

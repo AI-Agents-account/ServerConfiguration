@@ -177,3 +177,19 @@ This file documents real problems encountered during iterative setup and how we 
   - `udp sport 443 -> lookup main`
 - Implemented in `server1/setup.sh`.
 
+## 14) WG handshake is OK, but no traffic returns (Missing NAT/Forwarding)
+**Symptom**
+- `wg show` displays successful handshakes and data transfer (bytes sent).
+- Client shows "Connected" but cannot load any websites.
+- `tcpdump` on server's WAN interface shows packets from WG subnet leaving with original private IPs (e.g., 10.66.66.2) because they are not MASQUERADED.
+
+**Root cause**
+- WireGuard subnet (`10.66.66.0/24`) was missing a NAT MASQUERADE rule on the outbound interface (WAN).
+- UFW or iptables might be blocking forwarded packets from the `wg0` interface.
+
+**Fix**
+- Add MASQUERADE rule for the WG subnet in `wg0.conf` using `PostUp`/`PostDown`.
+- Ensure UFW allows routed traffic from `wg0` to the WAN interface.
+- Detection of WAN interface: `ip route get 1.1.1.1 | grep -oP 'dev \K\S+'`.
+- Implemented in `server1/wireguard/setup.sh` (PR #33 update).
+
