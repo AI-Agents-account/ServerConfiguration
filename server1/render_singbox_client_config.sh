@@ -57,7 +57,7 @@ cat > /etc/sing-box/client-server2.json <<JSON
       "mtu": $TUN_MTU,
       "auto_route": false,
       "strict_route": false,
-      "stack": "mixed"
+      "stack": "gvisor"
     }
   ],
   "outbounds": [
