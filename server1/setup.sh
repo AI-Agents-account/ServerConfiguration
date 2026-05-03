@@ -40,24 +40,22 @@ fi
 # 1. Install Sing-box
 bash "$SCRIPT_DIR/install_singbox.sh"
 
-# 2. Render unified VPN server config
-TUN_MODE="$MODE" bash "$SCRIPT_DIR/render_singbox_config.sh" "$ENV_FILE"
+# 2. Render sing-box CLIENT config for server1 -> server2 (egress) and create systemd unit
+TUN_MODE="$MODE" bash "$SCRIPT_DIR/render_singbox_client_config.sh" "$ENV_FILE"
 
-# 3. Create/Update Systemd Service (VPN Server with split-routing)
-cat <<EOF > /etc/systemd/system/sing-box-vpn.service
+cat <<'EOF' > /etc/systemd/system/sing-box-server2.service
 [Unit]
-Description=sing-box VPN Server (Split-Routing)
+Description=sing-box Client Tunnel (server1 -> server2)
 After=network-online.target nss-lookup.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
-Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true" "ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
-ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/vpn-server.json
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/vpn-server.json
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 Restart=always
 RestartSec=3
 LimitNOFILE=infinity
@@ -67,14 +65,13 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-# Do not start sing-box yet: in Public VPN mode certificates may be generated later (vpn_install).
-systemctl enable sing-box-vpn.service
+systemctl enable --now sing-box-server2.service
 
-# 4. Cleanup old services
-systemctl stop sing-box-server2.service tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
-systemctl disable sing-box-server2.service tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
+# 3. Cleanup legacy services (tun2socks / sslocal)
+systemctl stop tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
+systemctl disable tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
 
-# 5. Optional: VPN & WireGuard Server setup
+# 4. Optional: Public VPN bundle + WireGuard server
 # VPN must be installed BEFORE WireGuard as it performs 'ufw reset'
 if [[ "${ENABLE_SERVER1_PUBLIC_VPN:-0}" == "1" ]]; then
   echo "[setup] Installing Public VPN bundle (server1/vpn_install)..."
@@ -83,11 +80,7 @@ fi
 
 if [[ "${ENABLE_SERVER1_WIREGUARD:-0}" == "1" ]]; then
   echo "[setup] Installing WireGuard Server..."
-  bash "$SCRIPT_DIR/wireguard/setup.sh" "mobile-client"
+  bash "$SCRIPT_DIR/wireguard/setup.sh" "$ENV_FILE"
 fi
 
-# Now that optional components (including cert issuance) are installed, start/restart sing-box.
-echo "[setup] Starting sing-box-vpn.service..."
-systemctl restart sing-box-vpn.service
-
-echo "[setup] Done: mode=$MODE env=$ENV_FILE. sing-box-vpn.service is running."
+echo "[setup] Done: mode=$MODE env=$ENV_FILE. sing-box-server2.service is running."

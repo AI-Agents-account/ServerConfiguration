@@ -5,7 +5,7 @@ set -euo pipefail
 # Goal: route traffic from wg0 into sing-box sbox-tun (table 2022).
 
 WG_IF="${WG_IF:-wg0}"
-TUN_DEV="${TUN_DEV:-sbox-tun}"
+TUN_DEV="${TUN_DEV:-tun0}"
 TABLE_ID="${TABLE_ID:-2022}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2; exit 2; }; }
