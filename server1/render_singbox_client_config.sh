@@ -74,10 +74,6 @@ cat > /etc/sing-box/client-server2.json <<JSON
       "method": "$SS_METHOD",
       "password": "$SS_PASSWORD",
       "routing_mark": 255
-    },
-    {
-      "type": "dns",
-      "tag": "dns-out"
     }
   ],
   "route": {
