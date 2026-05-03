@@ -41,7 +41,16 @@ SERVER_PRIV=$(cat /etc/wireguard/server.key)
 SERVER_PUB=$(cat /etc/wireguard/server.pub)
 
 # Server public IP for endpoint
-SERVER_PUBLIC_IP="${SERVER1_PUBLIC_IP:-$(curl -4 -s https://api.ipify.org)}"
+if [[ -n "${SERVER1_PUBLIC_IP:-}" ]]; then
+  SERVER_PUBLIC_IP="${SERVER1_PUBLIC_IP}"
+else
+  # Try to detect public IP bypassing potential tunnels
+  SERVER_PUBLIC_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
+  if [[ -z "$SERVER_PUBLIC_IP" || "$SERVER_PUBLIC_IP" =~ ^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\.|^198\.(1[8-9])\. ]]; then
+     SERVER_PUBLIC_IP=$(curl -4 -s --interface "$(ip route get 1.1.1.1 | awk '/dev/ {print $5}')" https://api.ipify.org || curl -4 -s https://api.ipify.org)
+  fi
+fi
+log "Using Server Public IP: ${SERVER_PUBLIC_IP}"
 
 # Client keys (idempotent)
 CLIENT_DIR="/root/wireguard-clients/${CLIENT_NAME}"

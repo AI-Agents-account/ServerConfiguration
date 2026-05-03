@@ -79,7 +79,11 @@ if [[ -f "$SETTINGS_FILE" ]]; then
   source "$SETTINGS_FILE"
 else
   echo "Warning: $SETTINGS_FILE not found. Client files generation might be incomplete."
-  SERVER_IP=$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")
+  # Try to detect public IP bypassing potential tunnels
+  SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
+  if [[ -z "$SERVER_IP" || "$SERVER_IP" =~ ^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\.|^198\.(1[8-9])\. ]]; then
+     SERVER_IP=$(curl -s4 --interface "$(ip route get 1.1.1.1 | awk '/dev/ {print $5}')" https://api.ipify.org || curl -s4 https://api.ipify.org || echo "YOUR_SERVER_IP")
+  fi
   PORT_PUBLIC=443
   PORT_VLESS_REALITY_TCP=8443
   PORT_TROJAN_TLS_TCP=2053
@@ -175,7 +179,7 @@ cat > "${CLIENT_DIR}/singbox_windows_vless_tun.json" <<WIN_VLESS_TUN_EOF
     {
       "type": "vless",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "uuid": "${NEW_VLESS_UUID}",
       "flow": "xtls-rprx-vision",
@@ -231,7 +235,7 @@ cat > "${CLIENT_DIR}/singbox_windows_trojan_tun.json" <<WIN_TROJAN_TUN_EOF
     {
       "type": "trojan",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "password": "${NEW_TROJAN_PASSWORD}",
       "tls": {
@@ -281,7 +285,7 @@ cat > "${CLIENT_DIR}/singbox_windows_hysteria2_tun.json" <<WIN_HY2_TUN_EOF
     {
       "type": "hysteria2",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "password": "${NEW_HYSTERIA2_PASSWORD}",
       "tls": {
@@ -333,7 +337,7 @@ cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
     {
       "type": "vless",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "uuid": "${NEW_VLESS_UUID}",
       "flow": "xtls-rprx-vision",
@@ -379,7 +383,7 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
     {
       "type": "trojan",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "password": "${NEW_TROJAN_PASSWORD}",
       "tls": {
@@ -413,7 +417,7 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
     {
       "type": "hysteria2",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "password": "${NEW_HYSTERIA2_PASSWORD}",
       "tls": {

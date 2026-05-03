@@ -70,7 +70,7 @@ ufw --force enable
 
 # Restart sing-box client if present to recover from ufw reset connection stalling
 systemctl restart sing-box-server2.service 2>/dev/null || true
-sleep 5
+sleep 10
 
 # fail2ban (sshd)
 cat >/etc/fail2ban/jail.local <<'EOF'
@@ -376,6 +376,12 @@ cat >/etc/sing-box/vpn-server.json <<EOF
   "log": {"level": "info", "timestamp": true},
   "inbounds": [
     {
+      "type": "dns",
+      "tag": "dns-in",
+      "listen": "::",
+      "listen_port": 53
+    },
+    {
       "type": "vless",
       "tag": "vless-reality",
       "listen": "::",
@@ -489,51 +495,21 @@ systemctl daemon-reload || true
 systemctl enable sing-box-vpn || true
 systemctl restart sing-box-vpn || true
 
-# Standalone Hysteria2 server on UDP :443 (separate from sing-box)
-HYSTERIA_VERSION="${HYSTERIA_VERSION:-2.8.1}"
-HYSTERIA_URL="https://github.com/apernet/hysteria/releases/download/app/v${HYSTERIA_VERSION}/hysteria-linux-amd64"
-if [[ ! -x /usr/local/bin/hysteria ]]; then
-  echo "Installing hysteria v${HYSTERIA_VERSION}..."
-  curl -fsSL -o /usr/local/bin/hysteria "${HYSTERIA_URL}"
-  chmod +x /usr/local/bin/hysteria
-fi
-
-install -d -m 0755 /etc/hysteria
-cat >/etc/hysteria/config.yaml <<HYCFG
-auth:
-  type: password
-  password: "${HYSTERIA2_PASSWORD}"
-
-listen: :${PORT_PUBLIC}
-
-tls:
-  cert: ${FULLCHAIN}
-  key: ${PRIVKEY}
-HYCFG
-
-cat >/etc/systemd/system/hysteria.service <<'HYUNIT'
-[Unit]
-Description=Hysteria2 Server
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
-Restart=on-failure
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-HYUNIT
-
-systemctl daemon-reload || true
-systemctl enable hysteria || true
-systemctl restart hysteria || true
+# Standalone Hysteria2 server is disabled in favor of sing-box Hysteria2 inbound.
+# This avoids port conflicts on UDP/443.
+systemctl stop hysteria 2>/dev/null || true
+systemctl disable hysteria 2>/dev/null || true
 
 # Save settings for add_user_new.sh
-# Detect the VPS public IPv4. Do NOT rely on ifconfig.me here because the host may be behind a full-tunnel (egress != ingress).
-SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-if [[ -z "${SERVER_IP}" ]]; then
-  SERVER_IP="$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")"
+# Detect the VPS public IPv4 bypassing potential tunnels.
+if [[ -n "${SERVER1_PUBLIC_IP:-}" ]]; then
+  SERVER_IP="${SERVER1_PUBLIC_IP}"
+else
+  # Try to detect public IP bypassing potential tunnels
+  SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
+  if [[ -z "$SERVER_IP" || "$SERVER_IP" =~ ^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\.|^198\.(1[8-9])\. ]]; then
+     SERVER_IP=$(curl -s4 --interface "$(ip route get 1.1.1.1 | awk '/dev/ {print $5}')" https://api.ipify.org || curl -s4 https://api.ipify.org || echo "YOUR_SERVER_IP")
+  fi
 fi
 cat >/etc/vpn_settings.env <<ENV_EOF
 SERVER_IP="${SERVER_IP}"
@@ -709,7 +685,7 @@ cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
     {
       "type": "vless",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "uuid": "${VLESS_UUID}",
       "flow": "xtls-rprx-vision",
@@ -755,7 +731,7 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
     {
       "type": "trojan",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "password": "${TROJAN_PASSWORD}",
       "tls": {
@@ -789,7 +765,7 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
     {
       "type": "hysteria2",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "password": "${HYSTERIA2_PASSWORD}",
       "tls": {
@@ -815,7 +791,7 @@ templates_dir = pathlib.Path(os.environ.get('TEMPLATES_DIR',''))
 client_dir = pathlib.Path(os.environ['CLIENT_DIR'])
 
 mapping = {
-  '__SERVER__': os.environ['DOMAIN'],
+  '__SERVER__': os.environ.get('SERVER_IP', os.environ.get('DOMAIN')),
   '__PORT__': os.environ['PORT_PUBLIC'],
   '__UUID__': os.environ['VLESS_UUID'],
   '__PASSWORD__': os.environ.get('TROJAN_PASSWORD',''),
