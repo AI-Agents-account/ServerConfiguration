@@ -74,15 +74,6 @@ cat > /etc/sing-box/client-server2.json <<JSON
       "password": "$SS_PASSWORD"
     }
   ],
-  "dns": {
-    "servers": [
-      {"type": "udp", "tag": "dns-direct", "server": "1.1.1.1", "detour": "direct"},
-      {"type": "udp", "tag": "dns-direct-2", "server": "8.8.8.8", "detour": "direct"}
-    ],
-    "rules": [
-      {"action": "route", "server": "dns-direct"}
-    ]
-  },
   "route": {
     "auto_detect_interface": true,
     "rule_set": [
