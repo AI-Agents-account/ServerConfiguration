@@ -111,15 +111,24 @@ ip rule add pref 8000 dport 53 lookup main 2>/dev/null || true
 ip rule del pref 8001 2>/dev/null || true
 ip rule add pref 8001 sport 53 lookup main 2>/dev/null || true
 
-# 3. Mark 0xff (255) bypass: sing-box direct outbound/proxy traffic
+# 3. Inbound Services Bypass: responses to VPN clients must exit via WAN (avoid asymmetric routing)
+# Specifically for VLESS (443), Trojan (2053), and Hysteria2 (443 UDP)
+ip rule del pref 8005 2>/dev/null || true
+ip rule add pref 8005 ipproto tcp sport 443 lookup main 2>/dev/null || true
+ip rule del pref 8006 2>/dev/null || true
+ip rule add pref 8006 ipproto tcp sport 2053 lookup main 2>/dev/null || true
+ip rule del pref 8007 2>/dev/null || true
+ip rule add pref 8007 ipproto udp sport 443 lookup main 2>/dev/null || true
+
+# 4. Mark 0xff (255) bypass: sing-box direct outbound/proxy traffic
 ip rule del pref 8002 2>/dev/null || true
 ip rule add pref 8002 fwmark 255 lookup main 2>/dev/null || true
 
-# 4. Main table suppression: ignore default route in 'main', fall through to 2022
+# 5. Main table suppression: ignore default route in 'main', fall through to 2022
 ip rule del pref 9000 2>/dev/null || true
 ip rule add pref 9000 lookup main suppress_prefixlength 0 2>/dev/null || true
 
-# 5. Catch-all for suppressed/remaining: route to tun0
+# 6. Catch-all for suppressed/remaining: route to tun0
 ip rule del pref 9001 2>/dev/null || true
 ip rule add pref 9001 lookup $TABLE_ID 2>/dev/null || true
 

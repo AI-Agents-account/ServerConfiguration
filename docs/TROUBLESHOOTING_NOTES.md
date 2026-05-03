@@ -159,3 +159,21 @@ This file documents real problems encountered during iterative setup and how we 
 **Fix**
 - Added `ufw allow "${PORT_TROJAN_TLS_TCP}"/tcp` to `server1/vpn_install/setup.sh`.
 - Ensure clients are using the correct port in their Trojan links (e.g., `:2053`).
+
+## 13) Split-routing breaks inbound VPN connections (asymmetric routing)
+**Symptom**
+- Client connects (SYN), but no traffic/handshake fails. 
+- `tcpdump` on server shows SYN arriving on WAN interface, but SYN-ACK response sent via `tun0` (the VPN split tunnel).
+- Client receives RST or times out.
+
+**Root cause**
+- Policy routing rule `ip rule pref 9001 lookup vpn-split` captures all outgoing traffic that doesn't have a specific route in the `main` table. 
+- Responses from inbound services (VLESS/Trojan/Hysteria2) originate from the server's local IP but are incorrectly routed into the tunnel, creating asymmetric routing which is dropped by the client or intermediate firewalls.
+
+**Fix**
+- Added high-priority `ip rule` entries to force responses for specific service ports through the `main` routing table:
+  - `tcp sport 443 -> lookup main`
+  - `tcp sport 2053 -> lookup main`
+  - `udp sport 443 -> lookup main`
+- Implemented in `server1/setup.sh`.
+
