@@ -13,6 +13,7 @@ require_root() {
 main() {
   require_root
 
+  if command -v sing-box >/dev/null 2>&1; then return; fi
   apt-get update -y
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ca-certificates \

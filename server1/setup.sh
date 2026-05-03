@@ -66,6 +66,14 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
 
+# Add OS route for server2 explicitly to bypass loop
+if [[ -n "$TUN_SSIP" ]]; then
+  DEFAULT_GW=$(ip route show default | awk '/default/ {print $3}' | head -n1)
+  if [[ -n "$DEFAULT_GW" ]]; then
+    ip route add "$TUN_SSIP/32" via "$DEFAULT_GW" 2>/dev/null || true
+  fi
+fi
+
 systemctl daemon-reload
 systemctl enable --now sing-box-server2.service
 
