@@ -68,6 +68,9 @@ ufw allow "${WG_PORT_TO_ALLOW}"/udp
 
 ufw --force enable
 
+# Restart sing-box client if present to recover from ufw reset connection stalling
+systemctl restart sing-box-server2.service 2>/dev/null || true
+
 # fail2ban (sshd)
 cat >/etc/fail2ban/jail.local <<'EOF'
 [sshd]
