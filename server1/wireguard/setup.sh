@@ -76,10 +76,11 @@ cat > /etc/wireguard/${INTERFACE}.conf <<EOF
 Address = ${WG_SERVER_IP}
 ListenPort = ${WG_PORT}
 PrivateKey = ${SERVER_PRIV}
+MTU = 1280
 
-# NAT and Forwarding
-PostUp = iptables -t nat -A POSTROUTING -s ${WG_NET} -o ${WAN_IFACE} -j MASQUERADE; iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-PostDown = iptables -t nat -D POSTROUTING -s ${WG_NET} -o ${WAN_IFACE} -j MASQUERADE; iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# Forwarding and MSS Clamping (Full Tunnel via ${TUN_DEV})
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
 [Peer]
 PublicKey = ${CLIENT_PUB}
@@ -93,6 +94,7 @@ cat > "$CLIENT_DIR/${CLIENT_NAME}.conf" <<EOF
 PrivateKey = ${CLIENT_PRIV}
 Address = ${CLIENT_IP}
 DNS = ${WG_DNS1}, ${WG_DNS2}
+MTU = 1280
 
 [Peer]
 PublicKey = ${SERVER_PUB}
@@ -112,15 +114,9 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
   ufw route allow in on "${WAN_IFACE}" out on "${INTERFACE}" 2>/dev/null || true
 fi
 
-# Policy routing for split routing: traffic arriving from wg0 goes to table 2022 default via tun0
-log "Applying split-routing policy for WireGuard: iif ${INTERFACE} -> ${TUN_DEV}"
-if [[ -f "$(dirname "${BASH_SOURCE[0]}")/setup_split_routing.sh" ]]; then
-    log "Using ipset-based split routing (setup_split_routing.sh)"
-    bash "$(dirname "${BASH_SOURCE[0]}")/setup_split_routing.sh"
-else
-    log "Using basic split routing (apply_split_routing.sh)"
-    WG_IF="${INTERFACE}" TUN_DEV="${TUN_DEV}" bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/apply_split_routing.sh"
-fi
+# Policy routing: traffic arriving from wg0 goes to table 2022 default via tun0
+log "Applying full-tunnel policy for WireGuard: iif ${INTERFACE} -> ${TUN_DEV}"
+WG_IF="${INTERFACE}" TUN_DEV="${TUN_DEV}" bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/apply_split_routing.sh"
 
 # QR
 qrencode -o "$CLIENT_DIR/${CLIENT_NAME}.png" -t png < "$CLIENT_DIR/${CLIENT_NAME}.conf"

@@ -208,3 +208,18 @@ This file documents real problems encountered during iterative setup and how we 
   - `ip rule add pref 8008 ipproto udp sport 7666 lookup main`
 - Implemented in `server1/setup.sh`.
 
+## 16) WireGuard RU-split routing instability (Reversion to Full Tunnel)
+**Symptom**
+- WireGuard clients experience intermittent loading failures for certain sites.
+- Complex ipset-based split routing (`update-ru-ipset.sh`, `setup_split_routing.sh`) caused maintenance overhead and routing inconsistencies.
+
+**Root cause**
+- Managing large ipsets for RU-ranges on small VPS instances can lead to memory pressure or rule synchronization issues during high traffic.
+- Complexity of `mark` + `ipset` + `policy routing` was fragile compared to a clean tunnel-based approach.
+
+**Fix**
+- Reverted WireGuard configuration to a simplified **Full Tunnel via server2** (through `tun0`).
+- Removed `setup_split_routing.sh` and ipset-related timers.
+- Set **MTU 1280** and enabled **MSS Clamping** on `wg0` to ensure packet stability across varied network paths.
+- **Note**: VLESS, Trojan, and Hysteria2 clients continue to use in-app split-routing (RU direct, others proxy) for performance, as they operate at the application layer and don't share the same routing table constraints as the kernel-level WireGuard.
+
