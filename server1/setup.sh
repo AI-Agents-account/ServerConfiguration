@@ -75,6 +75,10 @@ if ! grep -q "^$TABLE_ID " /etc/iproute2/rt_tables 2>/dev/null; then
     echo "$TABLE_ID vpn-split" >> /etc/iproute2/rt_tables || true
 fi
 ip route replace default dev tun0 table $TABLE_ID 2>/dev/null || true
+# Keep DNS queries outside the tunnel to avoid resolver lock-ups
+ip rule del pref 8000 2>/dev/null || true
+ip rule add pref 8000 not from all dport 53 lookup main suppress_prefixlength 0 2>/dev/null || true
+
 ip rule del pref 9001 2>/dev/null || true
 ip rule add pref 9001 lookup $TABLE_ID suppress_prefixlength 0
 
