@@ -92,7 +92,7 @@ cat > /etc/sing-box/client-server2.json <<JSON
       {"type": "remote", "tag": "geosite-telegram", "format": "binary", "url": "$TELEGRAM_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "direct"}
     ],
     "rules": [
-      {"ip_cidr": ["10.0.0.0/8","192.168.0.0/16","172.16.0.0/12","127.0.0.0/8","169.254.0.0/16"], "action": "route", "outbound": "direct"},
+      {"ip_cidr": ["10.0.0.0/8","192.168.0.0/16","172.16.0.0/12","127.0.0.0/8","169.254.0.0/16","1.1.1.1/32","8.8.8.8/32"], "action": "route", "outbound": "direct"},
       {"ip_cidr": ["$SS_SERVER/32"], "action": "route", "outbound": "direct"},
 
 $SPLIT_RULES
