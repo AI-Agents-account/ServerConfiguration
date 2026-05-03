@@ -32,7 +32,7 @@ The global "catch-all" for the tunnel now uses a two-step process:
 - **Rule-set Resilience**: All remote rule-sets are configured with `download_detour: proxy` to ensure they can be updated even if the source (e.g., GitHub) is blocked in the server's region.
 
 ## 4. Summary of Changes
-- `server1/setup.sh`: Replaced aggressive routing rules with a tiered priority system (SSH > DNS > Mark > Main-specific > Tunnel).
-- `server1/render_singbox_client_config.sh`: Added `routing_mark` to all outbounds.
+- `server1/setup.sh`: Replaced aggressive routing rules with a tiered priority system (SSH > DNS > Mark > Main-specific > Tunnel). Added `resolvectl` calls to service `ExecStartPost` to prevent DNS loops.
+- `server1/render_singbox_client_config.sh`: Added `routing_mark` to all outbounds. Added explicit `dns` configuration and `hijack-dns` action to break circular resolution loops.
 - `server1/vpn_install/setup.sh`: Added `routing_mark` and unified rule-set download detours.
 - `server1/vpn_install/add_user.sh`: Fixed path to `/etc/sing-box/vpn-server.json` and added existence checks.
