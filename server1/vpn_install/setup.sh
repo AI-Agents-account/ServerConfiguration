@@ -27,8 +27,9 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2;
 : "${PORT_HYSTERIA2_QUIC_UDP:=8443}"
 : "${PORT_TRUSTTUNNEL:=9443}"
 : "${PORT_NGINX:=8080}"
-: "${REALITY_SERVER_NAME:=www.cloudflare.com}"
-: "${REALITY_HANDSHAKE_SERVER:=www.cloudflare.com}"
+: "${WG_PORT:=7666}"
+: "${REALITY_SERVER_NAME:=www.yandex.ru}"
+: "${REALITY_HANDSHAKE_SERVER:=www.yandex.ru}"
 : "${REALITY_HANDSHAKE_PORT:=443}"
 : "${SINGBOX_USER:=singbox}"
 
@@ -54,7 +55,23 @@ ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow "${PORT_PUBLIC}"/tcp
 ufw allow "${PORT_PUBLIC}"/udp
+ufw allow "${PORT_TROJAN_TLS_TCP}"/tcp
+
+# Also allow WireGuard port if it's already configured or at least its default
+WG_PORT_TO_ALLOW="${WG_PORT:-7666}"
+if [[ -f "/etc/wireguard/wg0.conf" ]]; then
+  DETECTED_WG_PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+  if [[ -n "$DETECTED_WG_PORT" ]]; then
+    WG_PORT_TO_ALLOW="$DETECTED_WG_PORT"
+  fi
+fi
+ufw allow "${WG_PORT_TO_ALLOW}"/udp
+
 ufw --force enable
+
+# Restart sing-box client if present to recover from ufw reset connection stalling
+systemctl restart sing-box-server2.service 2>/dev/null || true
+sleep 10
 
 # fail2ban (sshd)
 cat >/etc/fail2ban/jail.local <<'EOF'
@@ -122,9 +139,12 @@ if [[ -z "${TRUSTTUNNEL_PASSWORD:-}" ]]; then
 fi
 
 # Reality keypair
-XRAY_KEYS="$(xray x25519)"
-REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-$(echo "${XRAY_KEYS}" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')}"
-REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(echo "${XRAY_KEYS}" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')}"
+if [[ -z "${REALITY_PRIVATE_KEY:-}" || -z "${REALITY_PUBLIC_KEY:-}" ]]; then
+  echo "Generating Reality keypair using sing-box..."
+  REALITY_KEYS="$(sing-box generate reality-keypair)"
+  REALITY_PRIVATE_KEY="$(echo "${REALITY_KEYS}" | awk '/PrivateKey:/ {print $2}')"
+  REALITY_PUBLIC_KEY="$(echo "${REALITY_KEYS}" | awk '/PublicKey:/ {print $2}')"
+fi
 REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(openssl rand -hex 4)}"
 
 # TLS certs
@@ -132,11 +152,26 @@ CERT_PATH="/etc/letsencrypt/live/${DOMAIN}"
 FULLCHAIN="${CERT_PATH}/fullchain.pem"
 PRIVKEY="${CERT_PATH}/privkey.pem"
 
+# Preflight: if using Let's Encrypt, ensure DNS points to this server.
+# This avoids confusing failures where certbot reports connection refused on a different IP.
+if [[ "${ENABLE_LETSENCRYPT}" == "1" ]]; then
+  SERVER_IP_GUESS="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  for d in "${DOMAIN}" "${TRUSTTUNNEL_DOMAIN}"; do
+    a="$(dig +short A "$d" | tail -n 1 || true)"
+    if [[ -n "$SERVER_IP_GUESS" && -n "$a" && "$a" != "$SERVER_IP_GUESS" ]]; then
+      echo "ERROR: DNS A record for $d points to $a but this server IP is $SERVER_IP_GUESS. Fix DNS and re-run." >&2
+      exit 11
+    fi
+  done
+fi
+
 if [[ "${ENABLE_LETSENCRYPT}" == "1" ]]; then
   apt-get install -y certbot
   if [[ ! -f "${FULLCHAIN}" || ! -f "${PRIVKEY}" ]]; then
     echo "Requesting Let's Encrypt cert for ${DOMAIN} and ${TRUSTTUNNEL_DOMAIN} via standalone HTTP-01 on :80..."
     systemctl stop nginx 2>/dev/null || true
+    # Ensure port 80 is not occupied by anything else (like the python3 listener mentioned in subagent context)
+    fuser -k 80/tcp || true
     set +e
     certbot certonly --standalone --preferred-challenges http \
       -d "${DOMAIN}" -d "${TRUSTTUNNEL_DOMAIN}" -m "${EMAIL}" --agree-tos --non-interactive
@@ -151,13 +186,17 @@ fi
 # Fallback: self-signed cert if needed
 if [[ ( ! -f "${FULLCHAIN}" || ! -f "${PRIVKEY}" ) ]]; then
   if [[ "${ALLOW_SELF_SIGNED}" == "1" ]]; then
-    echo "Generating self-signed certificate for ${DOMAIN} (fallback)..." >&2
+    echo "Generating self-signed certificate with SAN for ${DOMAIN} (fallback)..." >&2
     mkdir -p /etc/sing-box/certs
     FULLCHAIN="/etc/sing-box/certs/${DOMAIN}.crt"
     PRIVKEY="/etc/sing-box/certs/${DOMAIN}.key"
+    
+    # Generate self-signed cert with SAN (Subject Alternative Name)
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
       -subj "/CN=${DOMAIN}" \
+      -addext "subjectAltName = DNS:${DOMAIN},DNS:${TRUSTTUNNEL_DOMAIN}" \
       -keyout "${PRIVKEY}" -out "${FULLCHAIN}"
+    
     chown root:${SINGBOX_USER} "${PRIVKEY}" || true
     chmod 640 "${PRIVKEY}" || true
   else
@@ -218,7 +257,7 @@ cp "${LE_FULLCHAIN}" /opt/trusttunnel/cert.pem
 cp "${LE_PRIVKEY}" /opt/trusttunnel/key.pem
 # TrustTunnel wizard can hang on some hosts even in non-interactive mode.
 # Run with a timeout. If REQUIRE_TRUSTTUNNEL_LE=1, do NOT fall back to self-signed.
-if ! timeout 180s ./setup_wizard -m non-interactive \
+if ! timeout 60s ./setup_wizard -m non-interactive \
     -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
     -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
     -n "${TRUSTTUNNEL_DOMAIN}" \
@@ -227,20 +266,92 @@ if ! timeout 180s ./setup_wizard -m non-interactive \
     --cert-type provided \
     --cert-chain-path /opt/trusttunnel/cert.pem \
     --cert-key-path /opt/trusttunnel/key.pem; then
-  if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
-    echo "[TrustTunnel] ERROR: setup_wizard failed with provided cert and REQUIRE_TRUSTTUNNEL_LE=1. Refusing self-signed fallback." >&2
-    echo "[TrustTunnel] Check: DNS for TRUSTTUNNEL_DOMAIN, inbound :80 for certbot HTTP-01, and that cert SAN includes TRUSTTUNNEL_DOMAIN." >&2
-    exit 21
-  fi
+  
+  # Workaround: If wizard failed but we have provided certs, create files manually.
+  if [[ -f /opt/trusttunnel/cert.pem && -f /opt/trusttunnel/key.pem ]]; then
+    echo "[TrustTunnel] setup_wizard failed; creating config files manually as a fallback..." >&2
+    
+    # Generate credentials.toml
+    cat >credentials.toml <<EOF
+[[client]]
+username = "${TRUSTTUNNEL_USERNAME}"
+password = "${TRUSTTUNNEL_PASSWORD}"
+EOF
 
-  echo "[TrustTunnel] setup_wizard failed or timed out with provided cert; retrying with self-signed (REQUIRE_TRUSTTUNNEL_LE=0)..." >&2
-  timeout 180s ./setup_wizard -m non-interactive \
-      -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
-      -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
-      -n "${TRUSTTUNNEL_DOMAIN}" \
-      --lib-settings vpn.toml \
-      --hosts-settings hosts.toml \
-      --cert-type self-signed
+    # Generate rules.toml (empty but valid)
+    cat >rules.toml <<EOF
+# Filter rules
+EOF
+
+    # Generate hosts.toml
+    cat >hosts.toml <<EOF
+ping_hosts = []
+speedtest_hosts = []
+reverse_proxy_hosts = []
+
+[[main_hosts]]
+hostname = "${TRUSTTUNNEL_DOMAIN}"
+cert_chain_path = "/opt/trusttunnel/cert.pem"
+private_key_path = "/opt/trusttunnel/key.pem"
+allowed_sni = []
+EOF
+
+    # Generate vpn.toml (minimal working config)
+    cat >vpn.toml <<EOF
+listen_address = "127.0.0.1:${PORT_TRUSTTUNNEL}"
+credentials_file = "credentials.toml"
+rules_file = "rules.toml"
+ipv6_available = true
+allow_private_network_connections = false
+tls_handshake_timeout_secs = 10
+client_listener_timeout_secs = 600
+connection_establishment_timeout_secs = 30
+tcp_connections_timeout_secs = 604800
+udp_connections_timeout_secs = 300
+speedtest_enable = false
+ping_enable = false
+auth_failure_status_code = 407
+[forward_protocol]
+[forward_protocol.direct]
+[listen_protocols]
+[listen_protocols.http1]
+upload_buffer_size = 32768
+[listen_protocols.http2]
+initial_connection_window_size = 8388608
+initial_stream_window_size = 131072
+max_concurrent_streams = 1000
+max_frame_size = 16384
+header_table_size = 65536
+[listen_protocols.quic]
+recv_udp_payload_size = 1350
+send_udp_payload_size = 1350
+initial_max_data = 104857600
+initial_max_stream_data_bidi_local = 1048576
+initial_max_stream_data_bidi_remote = 1048576
+initial_max_stream_data_uni = 1048576
+initial_max_streams_bidi = 4096
+initial_max_streams_uni = 4096
+max_connection_window = 25165824
+max_stream_window = 16777216
+disable_active_migration = true
+enable_early_data = true
+message_queue_capacity = 4096
+EOF
+  else
+    if [[ "${REQUIRE_TRUSTTUNNEL_LE}" == "1" ]]; then
+      echo "[TrustTunnel] ERROR: setup_wizard failed and no certs available." >&2
+      exit 21
+    fi
+
+    echo "[TrustTunnel] setup_wizard failed or timed out with provided cert; retrying with self-signed (REQUIRE_TRUSTTUNNEL_LE=0)..." >&2
+    timeout 60s ./setup_wizard -m non-interactive \
+        -a 127.0.0.1:${PORT_TRUSTTUNNEL} \
+        -c "${TRUSTTUNNEL_USERNAME}:${TRUSTTUNNEL_PASSWORD}" \
+        -n "${TRUSTTUNNEL_DOMAIN}" \
+        --lib-settings vpn.toml \
+        --hosts-settings hosts.toml \
+        --cert-type self-signed
+  fi
 fi
 
 cp trusttunnel.service.template /etc/systemd/system/trusttunnel.service
@@ -249,25 +360,37 @@ systemctl daemon-reload || true
 systemctl enable trusttunnel || true
 systemctl restart trusttunnel || true
 
-# sing-box config
+# sing-box config (vpn-server)
+# Requirement: split-routing must apply to ALL VPN clients (WireGuard + Public VPN).
+# For Public VPN, routing is implemented INSIDE sing-box using rule_sets:
+# - RU -> direct
+# - Telegram + all non-RU -> proxy (Shadowsocks to server2)
 install -d -m 0755 /etc/sing-box
-cat >/etc/sing-box/config.json <<EOF
+
+# Shadowsocks (server2) vars from server1/.env
+SS_SERVER="${TUN_SSIP:-${SS_SERVER:-}}"
+SS_PORT="${TUN_SSPORT:-${SS_SERVER_PORT:-}}"
+SS_METHOD="${TUN_SSMETHOD:-${SS_METHOD:-chacha20-ietf-poly1305}}"
+SS_PASSWORD="${TUN_SSPASSWORD:-${SS_PASSWORD:-}}"
+if [[ -z "${SS_SERVER}" || -z "${SS_PORT}" || -z "${SS_PASSWORD}" ]]; then
+  echo "ERROR: Missing Shadowsocks variables for split routing (TUN_SSIP/TUN_SSPORT/TUN_SSPASSWORD)" >&2
+  exit 6
+fi
+
+GEOIP_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs"
+GEOSITE_RU_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs"
+GEOSITE_TG_URL="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs"
+
+cat >/etc/sing-box/vpn-server.json <<EOF
 {
-  "log": {"level": "info"},
+  "log": {"level": "info", "timestamp": true},
   "inbounds": [
-    {
-      "type": "direct",
-      "tag": "tcp-mux",
-      "listen": "::",
-      "listen_port": ${PORT_PUBLIC},
-      "network": "tcp"
-    },
     {
       "type": "vless",
       "tag": "vless-reality",
-      "listen": "127.0.0.1",
-      "listen_port": ${PORT_VLESS_REALITY_TCP},
-      "users": [{"uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision"}],
+      "listen": "::",
+      "listen_port": 443,
+      "users": [{"name": "${TRUSTTUNNEL_USERNAME}", "uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision"}],
       "tls": {
         "enabled": true,
         "server_name": "${REALITY_SERVER_NAME}",
@@ -283,9 +406,9 @@ cat >/etc/sing-box/config.json <<EOF
     {
       "type": "trojan",
       "tag": "trojan-tls",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": ${PORT_TROJAN_TLS_TCP},
-      "users": [{"password": "${TROJAN_PASSWORD}"}],
+      "users": [{"name": "${TRUSTTUNNEL_USERNAME}", "password": "${TROJAN_PASSWORD}"}],
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
@@ -294,64 +417,77 @@ cat >/etc/sing-box/config.json <<EOF
         "key_path": "${PRIVKEY}"
       }
     },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2",
+      "listen": "::",
+      "listen_port": 443,
+      "users": [{"name": "${TRUSTTUNNEL_USERNAME}", "password": "${HYSTERIA2_PASSWORD}"}],
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": ["h3"],
+        "certificate_path": "${FULLCHAIN}",
+        "key_path": "${PRIVKEY}"
+      }
+    }
   ],
-  "outbounds": [{"type": "direct", "tag": "direct"}],
+  "outbounds": [
+    {"type": "direct", "tag": "direct", "routing_mark": 255},
+    {
+      "type": "shadowsocks",
+      "tag": "proxy",
+      "server": "${SS_SERVER}",
+      "server_port": ${SS_PORT},
+      "method": "${SS_METHOD}",
+      "password": "${SS_PASSWORD}",
+      "routing_mark": 255
+    }
+  ],
   "route": {
-    "rules": [
-      {
-        "inbound": ["tcp-mux"],
-        "action": "sniff"
-      },
-      {
-        "inbound": "tcp-mux",
-        "domain": ["${REALITY_SERVER_NAME}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_VLESS_REALITY_TCP}
-      },
-      {
-        "inbound": "tcp-mux",
-        "domain": ["${DOMAIN}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_TROJAN_TLS_TCP}
-      },
-      {
-        "inbound": "tcp-mux",
-        "domain": ["${TRUSTTUNNEL_DOMAIN}"],
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_TRUSTTUNNEL}
-      },
-      {
-        "inbound": "tcp-mux",
-        "action": "route",
-        "outbound": "direct",
-        "override_address": "127.0.0.1",
-        "override_port": ${PORT_NGINX}
-      },
+    "auto_detect_interface": true,
+    "rule_set": [
+      {"tag": "geoip-ru", "type": "remote", "format": "binary", "url": "${GEOIP_RU_URL}", "download_detour": "proxy"},
+      {"tag": "geosite-ru", "type": "remote", "format": "binary", "url": "${GEOSITE_RU_URL}", "download_detour": "proxy"},
+      {"tag": "geosite-telegram", "type": "remote", "format": "binary", "url": "${GEOSITE_TG_URL}", "download_detour": "proxy"}
     ],
-    "final": "direct"
+    "rules": [
+      {"protocol": "dns", "action": "hijack-dns"},
+
+      {"ip_cidr": ["10.0.0.0/8","192.168.0.0/16","172.16.0.0/12","127.0.0.0/8","169.254.0.0/16"], "action": "route", "outbound": "direct"},
+      {"ip_cidr": ["${SS_SERVER}/32"], "action": "route", "outbound": "direct"},
+
+      {"rule_set": ["geosite-telegram"], "action": "route", "outbound": "proxy"},
+      {"rule_set": ["geoip-ru", "geosite-ru"], "action": "route", "outbound": "direct"},
+
+      {"action": "route", "outbound": "proxy"}
+    ]
+  },
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "dns-direct", "server": "1.1.1.1"},
+      {"type": "udp", "tag": "dns-proxy", "server": "8.8.8.8", "detour": "proxy"}
+    ],
+    "final": "dns-direct"
   }
 }
 EOF
-chown root:${SINGBOX_USER} /etc/sing-box/config.json
-chmod 640 /etc/sing-box/config.json
+chown root:${SINGBOX_USER} /etc/sing-box/vpn-server.json
+chmod 640 /etc/sing-box/vpn-server.json
 
 # systemd service
-cat >/etc/systemd/system/sing-box.service <<'EOF'
+cat >/etc/systemd/system/sing-box-vpn.service <<'EOF'
 [Unit]
-Description=sing-box Service
+Description=sing-box VPN Server Service
 After=network.target
 
 [Service]
 User=singbox
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+WorkingDirectory=/etc/sing-box
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true" "ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/vpn-server.json
 Restart=on-failure
 LimitNOFILE=65535
 
@@ -360,54 +496,29 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload || true
-systemctl enable sing-box || true
-systemctl restart sing-box || true
+systemctl enable sing-box-vpn || true
+systemctl restart sing-box-vpn || true
 
-# Standalone Hysteria2 server on UDP :443 (separate from sing-box)
-HYSTERIA_VERSION="${HYSTERIA_VERSION:-2.8.1}"
-HYSTERIA_URL="https://github.com/apernet/hysteria/releases/download/app/v${HYSTERIA_VERSION}/hysteria-linux-amd64"
-if [[ ! -x /usr/local/bin/hysteria ]]; then
-  echo "Installing hysteria v${HYSTERIA_VERSION}..."
-  curl -fsSL -o /usr/local/bin/hysteria "${HYSTERIA_URL}"
-  chmod +x /usr/local/bin/hysteria
-fi
-
-install -d -m 0755 /etc/hysteria
-cat >/etc/hysteria/config.yaml <<HYCFG
-auth:
-  type: password
-  password: "${HYSTERIA2_PASSWORD}"
-
-listen: :${PORT_PUBLIC}
-
-tls:
-  cert: ${FULLCHAIN}
-  key: ${PRIVKEY}
-HYCFG
-
-cat >/etc/systemd/system/hysteria.service <<'HYUNIT'
-[Unit]
-Description=Hysteria2 Server
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
-Restart=on-failure
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-HYUNIT
-
-systemctl daemon-reload || true
-systemctl enable hysteria || true
-systemctl restart hysteria || true
+# Standalone Hysteria2 server is disabled in favor of sing-box Hysteria2 inbound.
+# This avoids port conflicts on UDP/443.
+systemctl stop hysteria 2>/dev/null || true
+systemctl disable hysteria 2>/dev/null || true
 
 # Save settings for add_user_new.sh
-# Detect the VPS public IPv4. Do NOT rely on ifconfig.me here because the host may be behind a full-tunnel (egress != ingress).
-SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-if [[ -z "${SERVER_IP}" ]]; then
-  SERVER_IP="$(curl -s4 ifconfig.me || echo "YOUR_SERVER_IP")"
+# Detect the VPS public IPv4 bypassing potential tunnels.
+# Priority: 1. SERVER1_PUBLIC_IP, 2. DOMAIN (preferred for links), 3. Auto-detection via main routing table.
+if [[ -n "${SERVER1_PUBLIC_IP:-}" ]]; then
+  SERVER_IP="${SERVER1_PUBLIC_IP}"
+elif [[ -n "${DOMAIN:-}" ]]; then
+  SERVER_IP="${DOMAIN}"
+else
+  # Detect public IP using the default interface of the main routing table to bypass tunnels (e.g. from server1 to server2)
+  WAN_IF=$(ip -4 route show table main default | awk '{print $5; exit}')
+  if [[ -n "$WAN_IF" ]]; then
+    SERVER_IP=$(curl -s4 --interface "$WAN_IF" https://api.ipify.org || curl -s4 https://api.ipify.org || echo "YOUR_SERVER_IP")
+  else
+    SERVER_IP=$(curl -s4 https://api.ipify.org || echo "YOUR_SERVER_IP")
+  fi
 fi
 cat >/etc/vpn_settings.env <<ENV_EOF
 SERVER_IP="${SERVER_IP}"
@@ -458,7 +569,7 @@ with open(out_path, "w", encoding="utf-8") as f:
 PY
 
 VLESS_LINK="vless://${VLESS_UUID}@${SERVER_IP}:${PORT_PUBLIC}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${TRUSTTUNNEL_USERNAME}-VLESS"
-TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
+TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_TROJAN_TLS_TCP}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
 HY2_LINK="hy2://${HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?sni=${DOMAIN}#${TRUSTTUNNEL_USERNAME}-Hysteria2"
 
 
@@ -517,12 +628,13 @@ cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
       "type": "trojan",
       "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_PUBLIC},
+      "server_port": ${PORT_TROJAN_TLS_TCP},
       "password": "${TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "utls": {"enabled": true, "fingerprint": "chrome"}
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "insecure": true
       }
     }
   ],
@@ -546,7 +658,8 @@ cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "alpn": ["h3"]
+        "alpn": ["h3"],
+        "insecure": true
       }
     }
   ],
@@ -583,7 +696,7 @@ cat > "${CLIENT_DIR}/singbox_ios_vless_tun.json" <<IOS_VLESS_EOF
     {
       "type": "vless",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "uuid": "${VLESS_UUID}",
       "flow": "xtls-rprx-vision",
@@ -629,14 +742,14 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
     {
       "type": "trojan",
       "tag": "proxy",
-      "server": "${DOMAIN}",
-      "server_port": ${PORT_PUBLIC},
+      "server": "${SERVER_IP}",
+      "server_port": ${PORT_TROJAN_TLS_TCP},
       "password": "${TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
         "alpn": ["h2", "http/1.1"],
-        "insecure": false
+        "insecure": true
       }
     },
     {"type": "direct", "tag": "direct"}
@@ -663,7 +776,7 @@ cat > "${CLIENT_DIR}/singbox_ios_hysteria2_tun.json" <<IOS_HY2_EOF
     {
       "type": "hysteria2",
       "tag": "proxy",
-      "server": "${DOMAIN}",
+      "server": "${SERVER_IP}",
       "server_port": ${PORT_PUBLIC},
       "password": "${HYSTERIA2_PASSWORD}",
       "tls": {
@@ -681,6 +794,7 @@ IOS_HY2_EOF
 
 # Windows sing-box (TUN) configs (full-tunnel)
 # Generated from templates in vpn_install/clients
+export TEMPLATES_DIR CLIENT_DIR DOMAIN PORT_PUBLIC PORT_TROJAN_TLS_TCP VLESS_UUID TROJAN_PASSWORD REALITY_SERVER_NAME REALITY_PUBLIC_KEY REALITY_SHORT_ID HYSTERIA2_PASSWORD
 python3 - <<'PY'
 import os, pathlib
 
@@ -688,8 +802,9 @@ templates_dir = pathlib.Path(os.environ.get('TEMPLATES_DIR',''))
 client_dir = pathlib.Path(os.environ['CLIENT_DIR'])
 
 mapping = {
-  '__SERVER__': os.environ['DOMAIN'],
+  '__SERVER__': os.environ.get('SERVER_IP', os.environ.get('DOMAIN')),
   '__PORT__': os.environ['PORT_PUBLIC'],
+  '__TROJAN_PORT__': os.environ['PORT_TROJAN_TLS_TCP'],
   '__UUID__': os.environ['VLESS_UUID'],
   '__PASSWORD__': os.environ.get('TROJAN_PASSWORD',''),
   '__TLS_SNI__': os.environ['DOMAIN'],
@@ -703,6 +818,11 @@ def render(tmpl_name: str, out_name: str, extra: dict | None = None):
   m = dict(mapping)
   if extra:
     m.update(extra)
+  
+  # For Trojan template, we should use __TROJAN_PORT__ instead of __PORT__
+  if 'trojan' in tmpl_name:
+      src = src.replace('__PORT__', m['__TROJAN_PORT__'])
+  
   for k,v in m.items():
     src = src.replace(k, str(v))
   (client_dir / out_name).write_text(src + "\n", encoding='utf-8')

@@ -1,0 +1,7 @@
+[Unit]
+Description=Update RU ipset for WireGuard Split Routing
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /usr/local/projects/wireguard/update-ru-ipset.sh

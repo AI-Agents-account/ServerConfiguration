@@ -3,7 +3,7 @@
 Пакет для установки и эксплуатации WireGuard на VPS в среде, где исходящий трафик сервера может быть **full-tunnel** через отдельный интерфейс (например `tun0` от `tun2socks`).
 
 Цели:
-- WireGuard сервер на **UDP :7666**
+- WireGuard сервер **жёстко** на **UDP :7666** (порт не конфигурируется)
 - Клиентский full-tunnel (IPv4-only по умолчанию)
 - Клиентский DNS **через сервер (10.66.66.1)**, чтобы не зависеть от «ненадёжного UDP DNS» через full-tunnel
 
@@ -17,6 +17,8 @@
 sudo bash wireguard/setup.sh greenapple
 ```
 
+По умолчанию скрипт (и в целом пакет) подразумевает, что WireGuard слушает **только UDP :7666**.
+
 По умолчанию скрипт:
 - создаёт `/etc/wireguard/wg0.conf`
 - поднимает `wg-quick@wg0`
@@ -29,9 +31,14 @@ sudo bash wireguard/setup.sh greenapple
 
 ### Важно про «трафик через туннель»
 
-Скрипт по умолчанию делает egress клиентов через `EGRESS_IF=tun0`.
+Скрипт по умолчанию делает egress клиентов через `EGRESS_IF=tun0` (full-tunnel через server2). 
 
-Если вам нужно временно проверить direct-egress через WAN (в обход tun0):
+Для обеспечения максимальной стабильности:
+- **MTU** установлен на `1280`.
+- **MSS Clamping** включен для предотвращения проблем с прохождением TCP-пакетов.
+- Весь трафик WireGuard-клиентов направляется через интерфейс `tun0`.
+
+Если вам нужно временно проверить direct-egress через WAN (в обход tun0) для всего трафика:
 
 ```bash
 EGRESS_IF=enp3s0 sudo bash wireguard/setup.sh greenapple
@@ -63,7 +70,7 @@ sudo bash wireguard/remove_egress_direct.sh
 
 ```bash
 WG_IF=wg0
-WG_PORT=7666
+# WG_PORT intentionally not configurable; fixed to 7666
 WG_NET=10.66.66.0/24
 WG_SERVER_IP=10.66.66.1/24
 WG_CLIENT_IP=10.66.66.2/32

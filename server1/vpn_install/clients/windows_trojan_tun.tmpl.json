@@ -2,8 +2,8 @@
   "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {"tag": "yandex1", "address": "77.88.8.8", "detour": "direct"},
-      {"tag": "yandex2", "address": "77.88.8.1", "detour": "direct"}
+      {"type": "udp", "tag": "yandex1", "server": "77.88.8.8", "server_port": 53},
+      {"type": "udp", "tag": "yandex2", "server": "77.88.8.1", "server_port": 53}
     ],
     "final": "yandex1",
     "strategy": "ipv4_only"
@@ -12,15 +12,15 @@
     {
       "type": "tun",
       "tag": "tun-in",
-      "inet4_address": "172.19.0.1/30",
+      "interface_name": "singbox0",
+      "address": ["172.19.0.1/30"],
+      "mtu": 1500,
       "auto_route": true,
       "strict_route": true,
-      "stack": "system",
-      "sniff": true
+      "stack": "system"
     }
   ],
   "outbounds": [
-    {"type": "dns", "tag": "dns-out"},
     {
       "type": "trojan",
       "tag": "proxy",
@@ -31,14 +31,17 @@
         "enabled": true,
         "server_name": "__TLS_SNI__",
         "alpn": ["h2", "http/1.1"],
-        "insecure": false
+        "insecure": true
       }
     },
     {"type": "direct", "tag": "direct"}
   ],
   "route": {
     "auto_detect_interface": true,
-    "rules": [{"protocol": "dns", "outbound": "dns-out"}],
+    "default_domain_resolver": "yandex1",
+    "rules": [
+      {"network": "udp", "port": 53, "action": "hijack-dns"}
+    ],
     "final": "proxy"
   }
 }

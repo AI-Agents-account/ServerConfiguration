@@ -1,16 +1,17 @@
-# server1 — ss-local + tun2socks
+# server1 — Sing-box Split/Full Tunnel & Public VPN
 
-Эта директория содержит отдельные сценарии для двух режимов:
+Эта директория содержит скрипты для настройки `server1` как клиента к `server2` с использованием **Sing-box** в режиме TUN-интерфейса, а также для развертывания публичного VPN-сервера.
 
-- **safe mode** — безопасный режим, только для пользователя `tunroute`
-- **full-tunnel mode** — весь исходящий трафик сервера через `tun2socks`
+Поддерживаются два режима клиентского туннеля:
 
-Также планируется отдельный режим **split-routing**:
-- российские/внутренние сервисы идут напрямую через WAN;
-- зарубежные сервисы выводятся через `tun0` и `server2`;
-- SSH‑доступ к `server1` фиксируется и не попадает под случайный редирект.
+- **full** — весь исходящий трафик сервера направляется через туннель к `server2`.
+- **split** — автоматический роутинг: российский трафик (по GeoIP/GeoSite) идет напрямую, остальной — через туннель к `server2`.
 
-Детальный план реализации split‑режима см. в разделе 9 `HARDENING_PLAN.md`.
+Также сервер может выступать в роли VPN-шлюза (VLESS, Trojan, Hysteria2, WireGuard) для конечных пользователей.
+
+⚠️ WireGuard: сервер **жёстко** слушает **UDP :7666** (порт не конфигурируется).
+
+Детальный план реализации см. в `docs/split-routing-architecture.md`.
 
 ## 0. Инициализация сервера
 
@@ -31,126 +32,78 @@ cp server1/.env.example server1/.env && nano server1/.env
 Минимально нужны:
 
 ```dotenv
+# Client-to-Server2 setup
 TUN_SSIP="89.167.112.24"
-TUN_SSPORT=6666
-TUN_SSPASSWORD="testPassword"
-TUN_SSMETHOD="chacha20-ietf-poly1305"
+SS_SERVER_PORT=6666
+SS_PASSWORD="testPassword"
+SS_METHOD="chacha20-ietf-poly1305"
+SERVER1_PUBLIC_IP="1.2.3.4" # Публичный IP этого сервера (для защиты SSH)
+
+# Optional: Enable Public VPN / WireGuard
+ENABLE_SERVER1_PUBLIC_VPN=1
+ENABLE_SERVER1_WIREGUARD=1
+
+# Required for Public VPN (VLESS/Trojan/Hysteria)
+DOMAIN="vpn.example.com"
+TRUSTTUNNEL_DOMAIN="tt.example.com"
+EMAIL="admin@example.com"
+
+# Reality SNI (default: www.yandex.ru)
+REALITY_SERVER_NAME="www.yandex.ru"
 ```
+
+### Настройка эндпоинта и Reality SNI
+
+В `.env` можно переопределить:
+- `SERVER1_PUBLIC_IP` — если не задано, ссылки будут генерироваться с использованием `DOMAIN`. Если `DOMAIN` тоже не задан, скрипт попытается определить IP автоматически через основную таблицу маршрутизации (чтобы не попасть на IP второго сервера через туннель).
+- `REALITY_SERVER_NAME` / `REALITY_HANDSHAKE_SERVER` — домен, под который маскируется VLESS Reality. По умолчанию `www.yandex.ru`. Рекомендуется использовать популярные российские домены для маскировки под локальный трафик.
 
 ---
 
-## 2. Одна команда настройки: safe/full
-
-### Safe mode
-
-Применение:
-
-```bash
-sudo bash ./server1/setup.sh safe server1/.env
-```
-
-Проверка:
-
-```bash
-sudo bash ./server1/check_via_server2.sh server1/.env safe
-```
-
-Запуск команд через туннель:
-
-Проверка через `curl`:
-
-```bash
-sudo via-server2 curl -4 https://ifconfig.me
-```
-
-Проверка через `wget`:
-
-```bash
-sudo via-server2 wget -O- https://ifconfig.me
-```
-
-### Что делает safe mode
-- устанавливает `tun2socks`
-- настраивает `ss-local`
-- поднимает `tun0`
-- создаёт policy routing table `100`
-- отправляет через туннель только трафик пользователя `tunroute`
-- не ломает обычный default route сервера
-
----
+## 2. Одна команда настройки: full / split
 
 ### Full-tunnel mode
 
-> Делать только при наличии аварийного/console-доступа.
-
-Применение:
+Весь трафик (кроме SSH и локальных сетей) уходит в туннель.
 
 ```bash
 sudo bash ./server1/setup.sh full server1/.env
 ```
 
-Проверка:
+### Split-routing mode
+
+Трафик к ресурсам в РФ (определяется автоматически через GeoIP/GeoSite) идет напрямую. Остальное — в туннель.
 
 ```bash
-sudo bash ./server1/check_via_server2.sh server1/.env full
+sudo bash ./server1/setup.sh split server1/.env
 ```
-
-### Что делает full-tunnel mode
-- поднимает `tun0`
-- делает `tun0` основным default route в `main` table
-- оставляет uplink через `eth0` как fallback route с худшим metric
-- создаёт отдельную routing table `lip` для трафика, исходящего с публичного IP `server1`
-- добавляет `ip rule from <server1_public_ip> lookup lip`, чтобы ответы на входящие подключения к `server1` уходили обратно через uplink, а не в `tun0`
-- пинит напрямую через реальный gateway:
-  - `server2` (`TUN_SSIP`)
-  - default gateway
-  - metadata range `169.254.169.0/24`
-  - текущие DNS-резолверы хоста (авто-детект)
-  - активные SSH peer IPs (чтобы не рвать текущие SSH-сессии)
-  - дополнительные IP/подсети из `FULL_TUNNEL_BYPASS_IPS`
-- тем самым позволяет `server1` быть входной точкой для обычных клиентов/сервисов, но выпускать их egress через `server2`
 
 ---
 
-## Временно отключить / вернуть full-tunnel
+## Архитектура Sing-box
 
-После того как `full` уже был один раз настроен через `setup.sh`, можно быстро переключать режим отдельными скриптами.
+На `server1` запускаются два раздельных инстанса Sing-box:
 
-### Отключить перенаправление трафика через server2
-
-```bash
-sudo bash ./server1/stop_tun2socks_route.sh
-```
-
-Что делает:
-- останавливает `tun2socks-full-routing.service`
-- останавливает `tun2socks-server2.service`
-- останавливает `shadowsocks-libev-local@server2-client.service`
-- удаляет legacy remnant'ы старого `fwmark/table100` режима, если они были
-- удаляет правило `from <server1_public_ip> lookup lip` и очищает table `lip`
-- убирает default route через `tun0`
-- восстанавливает обычный прямой default route через uplink `eth0`
-- возвращает обычный прямой egress через `server1`
-
-### Снова поднять full-tunnel
-
-```bash
-sudo bash ./server1/restart_tun2socks_route.sh
-```
-
-Что делает:
-- поднимает `shadowsocks-libev-local@server2-client.service`
-- поднимает `tun2socks-server2.service`
-- заново применяет `tun2socks-full-routing.service`
-- возвращает egress через `server2`
+1.  **Client Instance** (`sing-box-server2.service`):
+    - Использует конфиг `/etc/sing-box/client-server2.json`.
+    - Поднимает TUN-интерфейс для проброса трафика сервера на `server2`.
+2.  **Server Instance** (`sing-box-vpn.service`):
+    - Использует конфиг `/etc/sing-box/vpn-server.json`.
+    - Принимает входящие подключения пользователей (VLESS, Trojan).
 
 ## Диагностика
 
 ```bash
-systemctl status shadowsocks-libev-local@server2-client.service --no-pager
-systemctl status tun2socks-server2.service --no-pager
-ip -br addr show tun0
-ip route
-ip rule show
-journalctl -u tun2socks-server2.service -n 50 --no-pager
+# Статус клиентского туннеля
+sudo systemctl status sing-box-server2.service --no-pager
+
+# Статус VPN-сервера
+sudo systemctl status sing-box-vpn.service --no-pager
+
+# Логи
+sudo journalctl -u sing-box-server2.service -f
+sudo journalctl -u sing-box-vpn.service -f
+
+# Проверка внешнего IP (должен быть IP от server2)
+curl -4 https://ifconfig.me
 ```

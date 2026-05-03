@@ -5,7 +5,7 @@
   ],
   "outbounds": [
     {
-      "type": "hysteria2",
+      "type": "trojan",
       "tag": "out",
       "server": "__SERVER__",
       "server_port": __PORT__,
@@ -13,7 +13,9 @@
       "tls": {
         "enabled": true,
         "server_name": "__TLS_SNI__",
-        "alpn": ["h3"]
+        "alpn": ["h2", "http/1.1"],
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "insecure": true
       }
     }
   ],
