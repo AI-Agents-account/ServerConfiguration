@@ -138,9 +138,12 @@ if [[ -z "${TRUSTTUNNEL_PASSWORD:-}" ]]; then
 fi
 
 # Reality keypair
-XRAY_KEYS="$(xray x25519)"
-REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-$(echo "${XRAY_KEYS}" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')}"
-REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(echo "${XRAY_KEYS}" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')}"
+if [[ -z "${REALITY_PRIVATE_KEY:-}" || -z "${REALITY_PUBLIC_KEY:-}" ]]; then
+  echo "Generating Reality keypair using sing-box..."
+  REALITY_KEYS="$(sing-box generate reality-keypair)"
+  REALITY_PRIVATE_KEY="$(echo "${REALITY_KEYS}" | awk '/PrivateKey:/ {print $2}')"
+  REALITY_PUBLIC_KEY="$(echo "${REALITY_KEYS}" | awk '/PublicKey:/ {print $2}')"
+fi
 REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(openssl rand -hex 4)}"
 
 # TLS certs
@@ -166,6 +169,8 @@ if [[ "${ENABLE_LETSENCRYPT}" == "1" ]]; then
   if [[ ! -f "${FULLCHAIN}" || ! -f "${PRIVKEY}" ]]; then
     echo "Requesting Let's Encrypt cert for ${DOMAIN} and ${TRUSTTUNNEL_DOMAIN} via standalone HTTP-01 on :80..."
     systemctl stop nginx 2>/dev/null || true
+    # Ensure port 80 is not occupied by anything else (like the python3 listener mentioned in subagent context)
+    fuser -k 80/tcp || true
     set +e
     certbot certonly --standalone --preferred-challenges http \
       -d "${DOMAIN}" -d "${TRUSTTUNNEL_DOMAIN}" -m "${EMAIL}" --agree-tos --non-interactive
@@ -180,13 +185,17 @@ fi
 # Fallback: self-signed cert if needed
 if [[ ( ! -f "${FULLCHAIN}" || ! -f "${PRIVKEY}" ) ]]; then
   if [[ "${ALLOW_SELF_SIGNED}" == "1" ]]; then
-    echo "Generating self-signed certificate for ${DOMAIN} (fallback)..." >&2
+    echo "Generating self-signed certificate with SAN for ${DOMAIN} (fallback)..." >&2
     mkdir -p /etc/sing-box/certs
     FULLCHAIN="/etc/sing-box/certs/${DOMAIN}.crt"
     PRIVKEY="/etc/sing-box/certs/${DOMAIN}.key"
+    
+    # Generate self-signed cert with SAN (Subject Alternative Name)
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
       -subj "/CN=${DOMAIN}" \
+      -addext "subjectAltName = DNS:${DOMAIN},DNS:${TRUSTTUNNEL_DOMAIN}" \
       -keyout "${PRIVKEY}" -out "${FULLCHAIN}"
+    
     chown root:${SINGBOX_USER} "${PRIVKEY}" || true
     chmod 640 "${PRIVKEY}" || true
   else
@@ -397,7 +406,7 @@ cat >/etc/sing-box/vpn-server.json <<EOF
       "type": "trojan",
       "tag": "trojan-tls",
       "listen": "::",
-      "listen_port": 2053,
+      "listen_port": ${PORT_TROJAN_TLS_TCP},
       "users": [{"password": "${TROJAN_PASSWORD}"}],
       "tls": {
         "enabled": true,
@@ -554,7 +563,7 @@ with open(out_path, "w", encoding="utf-8") as f:
 PY
 
 VLESS_LINK="vless://${VLESS_UUID}@${SERVER_IP}:${PORT_PUBLIC}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${TRUSTTUNNEL_USERNAME}-VLESS"
-TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
+TROJAN_LINK="trojan://${TROJAN_PASSWORD}@${SERVER_IP}:${PORT_TROJAN_TLS_TCP}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${TRUSTTUNNEL_USERNAME}-Trojan"
 HY2_LINK="hy2://${HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?sni=${DOMAIN}#${TRUSTTUNNEL_USERNAME}-Hysteria2"
 
 
@@ -613,12 +622,13 @@ cat > "${CLIENT_DIR}/singbox_trojan.json" <<TROJAN_EOF
       "type": "trojan",
       "tag": "out",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_PUBLIC},
+      "server_port": ${PORT_TROJAN_TLS_TCP},
       "password": "${TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "utls": {"enabled": true, "fingerprint": "chrome"}
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "insecure": true
       }
     }
   ],
@@ -642,7 +652,8 @@ cat > "${CLIENT_DIR}/singbox_hysteria2.json" <<HY2_EOF
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
-        "alpn": ["h3"]
+        "alpn": ["h3"],
+        "insecure": true
       }
     }
   ],
@@ -726,13 +737,13 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
       "type": "trojan",
       "tag": "proxy",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_PUBLIC},
+      "server_port": ${PORT_TROJAN_TLS_TCP},
       "password": "${TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
         "alpn": ["h2", "http/1.1"],
-        "insecure": false
+        "insecure": true
       }
     },
     {"type": "direct", "tag": "direct"}
@@ -777,7 +788,7 @@ IOS_HY2_EOF
 
 # Windows sing-box (TUN) configs (full-tunnel)
 # Generated from templates in vpn_install/clients
-export TEMPLATES_DIR CLIENT_DIR DOMAIN PORT_PUBLIC VLESS_UUID TROJAN_PASSWORD REALITY_SERVER_NAME REALITY_PUBLIC_KEY REALITY_SHORT_ID HYSTERIA2_PASSWORD
+export TEMPLATES_DIR CLIENT_DIR DOMAIN PORT_PUBLIC PORT_TROJAN_TLS_TCP VLESS_UUID TROJAN_PASSWORD REALITY_SERVER_NAME REALITY_PUBLIC_KEY REALITY_SHORT_ID HYSTERIA2_PASSWORD
 python3 - <<'PY'
 import os, pathlib
 
@@ -787,6 +798,7 @@ client_dir = pathlib.Path(os.environ['CLIENT_DIR'])
 mapping = {
   '__SERVER__': os.environ.get('SERVER_IP', os.environ.get('DOMAIN')),
   '__PORT__': os.environ['PORT_PUBLIC'],
+  '__TROJAN_PORT__': os.environ['PORT_TROJAN_TLS_TCP'],
   '__UUID__': os.environ['VLESS_UUID'],
   '__PASSWORD__': os.environ.get('TROJAN_PASSWORD',''),
   '__TLS_SNI__': os.environ['DOMAIN'],
@@ -800,6 +812,11 @@ def render(tmpl_name: str, out_name: str, extra: dict | None = None):
   m = dict(mapping)
   if extra:
     m.update(extra)
+  
+  # For Trojan template, we should use __TROJAN_PORT__ instead of __PORT__
+  if 'trojan' in tmpl_name:
+      src = src.replace('__PORT__', m['__TROJAN_PORT__'])
+  
   for k,v in m.items():
     src = src.replace(k, str(v))
   (client_dir / out_name).write_text(src + "\n", encoding='utf-8')

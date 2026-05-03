@@ -40,3 +40,9 @@ The global "catch-all" for the tunnel now uses a two-step process:
 ### 3.5 Sing-box Version Compatibility & WireGuard DNS
 - **DNS Inbound Fix**: An attempt to use an inbound of type `dns` on sing-box 1.13.6 caused service failure (`unknown inbound type: dns`). This inbound was removed as it's not supported in this version.
 - **WireGuard DNS**: Since the local DNS inbound on 10.66.66.1 (sing-box) was removed, WireGuard client configurations were updated to use public DNS servers (1.1.1.1, 8.8.8.8) directly. This ensures DNS resolution works for WG clients without requiring a local resolver on the VPN server's internal WG IP.
+
+### 3.6 Trojan, Reality, and Hysteria2 Verification Fixes
+- **Trojan Port Consistency**: Fixed a mismatch where Trojan was listening on port 2053 but client links were generated with port 443. All Trojan artifacts now consistently use `PORT_TROJAN_TLS_TCP` (2053).
+- **SAN Certificate Support**: Updated self-signed certificate generation to include `subjectAltName` (SAN). This fixes the `x509: certificate relies on legacy Common Name field` error in modern Hysteria2 and Trojan clients.
+- **Reality Key Synchronization**: Switched to `sing-box generate reality-keypair` for generating VLESS Reality keys. Both Private and Public keys are now explicitly stored and synchronized between server configuration and client links, preventing "reality verification failed" errors.
+- **Insecure Fallback in Clients**: Added `insecure: true` to Trojan and Hysteria2 client configurations as a robust fallback for self-signed certificates.

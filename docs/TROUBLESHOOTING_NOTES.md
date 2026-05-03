@@ -130,3 +130,20 @@ This file documents real problems encountered during iterative setup and how we 
 - Removed the `dns` inbound from `vpn-server.json`.
 - Since the server-side local DNS resolver was removed, updated WireGuard client configs to use public DNS (1.1.1.1, 8.8.8.8) instead of trying to reach `10.66.66.1:53`.
 - Commits: `00ae242`.
+
+## 11) Trojan/Hy2/Reality connectivity issues (Port mismatch, SAN missing, Key desync)
+**Symptom**
+- Trojan client: `EOF` or connection refused.
+- Hysteria2 client: `tls: failed to verify certificate: x509: certificate relies on legacy Common Name field, use SANs instead`.
+- VLESS client: `reality verification failed`.
+
+**Root cause**
+- **Port mismatch**: Trojan listened on 2053 but links said 443.
+- **Certificate SAN missing**: Self-signed certs used only `/CN`, but modern TLS clients require SAN.
+- **Reality Key mismatch**: `pbk` in links didn't match the private key on server because they were generated independently.
+
+**Fix**
+- **Unified Ports**: Updated `setup.sh` and `add_user.sh` to use 2053 for all Trojan links/configs.
+- **SAN Certs**: Updated `openssl` call in `setup.sh` to include `-addext "subjectAltName = DNS:${DOMAIN},DNS:${TRUSTTUNNEL_DOMAIN}"`.
+- **Key Sync**: Switched to `sing-box generate reality-keypair` and ensured both keys are saved to `/etc/vpn_settings.env`.
+- **Insecure Fallback**: Set `insecure: true` for self-signed Trojan/Hy2 client profiles.

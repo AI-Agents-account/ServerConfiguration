@@ -134,7 +134,7 @@ PY
 fi
 
 VLESS_LINK="vless://${NEW_VLESS_UUID}@${SERVER_IP}:${PORT_PUBLIC}?security=reality&encryption=none&pbk=${REALITY_PUBLIC_KEY}&headerType=none&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=${REALITY_SERVER_NAME}&sid=${REALITY_SHORT_ID}#${USERNAME}-VLESS"
-TROJAN_LINK="trojan://${NEW_TROJAN_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${USERNAME}-Trojan"
+TROJAN_LINK="trojan://${NEW_TROJAN_PASSWORD}@${SERVER_IP}:${PORT_TROJAN_TLS_TCP}?security=tls&sni=${DOMAIN}&type=tcp&headerType=none#${USERNAME}-Trojan"
 HY2_LINK="hy2://${NEW_HYSTERIA2_PASSWORD}@${SERVER_IP}:${PORT_PUBLIC}?sni=${DOMAIN}#${USERNAME}-Hysteria2"
 
 cat > "${CLIENT_DIR}/links.txt" <<LINKS_EOF
@@ -236,13 +236,13 @@ cat > "${CLIENT_DIR}/singbox_windows_trojan_tun.json" <<WIN_TROJAN_TUN_EOF
       "type": "trojan",
       "tag": "proxy",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_PUBLIC},
+      "server_port": ${PORT_TROJAN_TLS_TCP},
       "password": "${NEW_TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
         "alpn": ["h2", "http/1.1"],
-        "insecure": false
+        "insecure": true
       }
     },
     {"type": "direct", "tag": "direct"}
@@ -384,13 +384,13 @@ cat > "${CLIENT_DIR}/singbox_ios_trojan_tun.json" <<IOS_TROJAN_EOF
       "type": "trojan",
       "tag": "proxy",
       "server": "${SERVER_IP}",
-      "server_port": ${PORT_PUBLIC},
+      "server_port": ${PORT_TROJAN_TLS_TCP},
       "password": "${NEW_TROJAN_PASSWORD}",
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
         "alpn": ["h2", "http/1.1"],
-        "insecure": false
+        "insecure": true
       }
     },
     {"type": "direct", "tag": "direct"}

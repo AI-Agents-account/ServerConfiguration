@@ -21,6 +21,16 @@ Goal: verify split-routing works for **ALL VPN clients**:
 3) Telegram test: open Telegram.
 4) Foreign egress IP: `https://ifconfig.me` should show **server2** IP.
 
+## Tests (Trojan client)
+1) Connect via Trojan on 2053.
+2) Verify connection succeeds (no certificate errors).
+3) RU test / Foreign IP test.
+
+## Tests (Hysteria2 client)
+1) Connect via Hysteria2 on 443.
+2) Verify connection succeeds (no SAN certificate errors).
+3) RU test / Foreign IP test.
+
 ## Server-side verification commands
 - Services:
   - `systemctl is-active sing-box-server2 sing-box-vpn wg-quick@wg0`
