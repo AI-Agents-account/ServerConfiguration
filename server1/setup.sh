@@ -58,6 +58,7 @@ User=root
 AmbientCapabilities=CAP_NET_ADMIN
 CapabilityBoundingSet=CAP_NET_ADMIN
 Environment="ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
+Environment="ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true"
 ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
 # Prevent systemd-resolved from using the tunnel for global DNS resolution to avoid loops.
