@@ -193,3 +193,18 @@ This file documents real problems encountered during iterative setup and how we 
 - Detection of WAN interface: `ip route get 1.1.1.1 | grep -oP 'dev \K\S+'`.
 - Implemented in `server1/wireguard/setup.sh` (PR #33 update).
 
+## 15) WireGuard: client "sent" only / no receive (Asymmetric Handshake Reply)
+**Symptom**
+- WireGuard client shows packets sent but 0 bytes received.
+- `wg show` on server might show bytes sent/received, but client never completes handshake or establishes tunnel.
+- `tcpdump` shows handshake packet (UDP 7666) arriving on server WAN, but the reply packet exits via `tun0` (split-routing) instead of WAN.
+
+**Root cause**
+- Catch-all `ip rule pref 9001 lookup vpn-split` captured the WireGuard handshake reply (source port 7666) and sent it into the tunnel.
+- This happened even when `suppress_prefixlength 0` was present if the reply path didn't have a specific host route in `main`.
+
+**Fix**
+- Added explicit high-priority rule for WireGuard source port to exit via `main` table:
+  - `ip rule add pref 8008 ipproto udp sport 7666 lookup main`
+- Implemented in `server1/setup.sh`.
+
