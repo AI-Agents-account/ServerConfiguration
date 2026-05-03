@@ -36,3 +36,7 @@ The global "catch-all" for the tunnel now uses a two-step process:
 - `server1/render_singbox_client_config.sh`: Added `routing_mark` to all outbounds. Added explicit `dns` configuration and `hijack-dns` action to break circular resolution loops.
 - `server1/vpn_install/setup.sh`: Added `routing_mark` and unified rule-set download detours.
 - `server1/vpn_install/add_user.sh`: Fixed path to `/etc/sing-box/vpn-server.json` and added existence checks.
+
+### 3.5 Sing-box Version Compatibility & WireGuard DNS
+- **DNS Inbound Fix**: An attempt to use an inbound of type `dns` on sing-box 1.13.6 caused service failure (`unknown inbound type: dns`). This inbound was removed as it's not supported in this version.
+- **WireGuard DNS**: Since the local DNS inbound on 10.66.66.1 (sing-box) was removed, WireGuard client configurations were updated to use public DNS servers (1.1.1.1, 8.8.8.8) directly. This ensures DNS resolution works for WG clients without requiring a local resolver on the VPN server's internal WG IP.

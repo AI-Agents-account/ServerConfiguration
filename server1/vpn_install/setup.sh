@@ -376,12 +376,6 @@ cat >/etc/sing-box/vpn-server.json <<EOF
   "log": {"level": "info", "timestamp": true},
   "inbounds": [
     {
-      "type": "dns",
-      "tag": "dns-in",
-      "listen": "::",
-      "listen_port": 53
-    },
-    {
       "type": "vless",
       "tag": "vless-reality",
       "listen": "::",
