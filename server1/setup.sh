@@ -57,6 +57,7 @@ CapabilityBoundingSet=CAP_NET_ADMIN
 Environment="ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
 ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
+ExecStartPost=-/usr/bin/resolvectl revert tun0
 Restart=always
 RestartSec=3
 LimitNOFILE=infinity
@@ -80,7 +81,7 @@ ip rule del pref 8000 2>/dev/null || true
 ip rule add pref 8000 not from all dport 53 lookup main suppress_prefixlength 0 2>/dev/null || true
 
 ip rule del pref 9001 2>/dev/null || true
-ip rule add pref 9001 lookup $TABLE_ID suppress_prefixlength 0
+ip rule add pref 9001 lookup $TABLE_ID
 
 # 4. Cleanup legacy services (tun2socks / sslocal)
 systemctl stop tun2socks-server2.service sslocal-server2.service tun2socks-full-routing.service 2>/dev/null || true
