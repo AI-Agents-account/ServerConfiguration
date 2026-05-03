@@ -24,10 +24,16 @@ else
   echo "[apply_split_routing] WARNING: $TUN_DEV not found. Table $TABLE_ID route not applied."
 fi
 
-# Route ONLY traffic entering from wg0 into table 2022
-if ! ip rule show | grep -q "iif ${WG_IF}.*lookup ${TABLE_ID}"; then
-  ip rule add pref 10000 iif "$WG_IF" lookup "$TABLE_ID"
-fi
+# Route ONLY traffic entering from wg0 into table 2022 (idempotent)
+# Remove duplicates (including legacy rules without pref)
+while ip rule show | grep -q "iif ${WG_IF}.*lookup ${TABLE_ID}"; do
+  # Delete the first matching rule line
+  LINE=$(ip rule show | grep "iif ${WG_IF}.*lookup ${TABLE_ID}" | head -n1)
+  PREF=$(echo "$LINE" | awk -F: '{print $1}')
+  ip rule del pref "$PREF" || break
+done
+
+ip rule add pref 10000 iif "$WG_IF" lookup "$TABLE_ID" 2>/dev/null || true
 
 # Ensure IP forwarding
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
