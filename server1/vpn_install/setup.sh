@@ -390,7 +390,7 @@ cat >/etc/sing-box/vpn-server.json <<EOF
       "tag": "vless-reality",
       "listen": "::",
       "listen_port": 443,
-      "users": [{"uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision"}],
+      "users": [{"name": "${TRUSTTUNNEL_USERNAME}", "uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision"}],
       "tls": {
         "enabled": true,
         "server_name": "${REALITY_SERVER_NAME}",
@@ -408,7 +408,7 @@ cat >/etc/sing-box/vpn-server.json <<EOF
       "tag": "trojan-tls",
       "listen": "::",
       "listen_port": ${PORT_TROJAN_TLS_TCP},
-      "users": [{"password": "${TROJAN_PASSWORD}"}],
+      "users": [{"name": "${TRUSTTUNNEL_USERNAME}", "password": "${TROJAN_PASSWORD}"}],
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
@@ -422,7 +422,7 @@ cat >/etc/sing-box/vpn-server.json <<EOF
       "tag": "hysteria2",
       "listen": "::",
       "listen_port": 443,
-      "users": [{"name": "admin", "password": "${HYSTERIA2_PASSWORD}"}],
+      "users": [{"name": "${TRUSTTUNNEL_USERNAME}", "password": "${HYSTERIA2_PASSWORD}"}],
       "tls": {
         "enabled": true,
         "server_name": "${DOMAIN}",
