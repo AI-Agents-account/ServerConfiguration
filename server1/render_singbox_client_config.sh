@@ -77,10 +77,10 @@ cat > /etc/sing-box/client-server2.json <<JSON
   "route": {
     "auto_detect_interface": true,
     "rule_set": [
-      {"type": "remote", "tag": "geoip-ru", "format": "binary", "url": "$RU_GEOIP_SRS_URL", "update_interval": "1d", "download_detour": "direct"},
-      {"type": "remote", "tag": "geosite-ru", "format": "binary", "url": "$RU_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "direct"},
-      {"type": "remote", "tag": "geosite-gov-ru", "format": "binary", "url": "$RU_GOV_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "direct"},
-      {"type": "remote", "tag": "geosite-telegram", "format": "binary", "url": "$TELEGRAM_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "direct"}
+      {"type": "remote", "tag": "geoip-ru", "format": "binary", "url": "$RU_GEOIP_SRS_URL", "update_interval": "1d", "download_detour": "proxy"},
+      {"type": "remote", "tag": "geosite-ru", "format": "binary", "url": "$RU_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "proxy"},
+      {"type": "remote", "tag": "geosite-gov-ru", "format": "binary", "url": "$RU_GOV_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "proxy"},
+      {"type": "remote", "tag": "geosite-telegram", "format": "binary", "url": "$TELEGRAM_GEOSITE_SRS_URL", "update_interval": "1d", "download_detour": "proxy"}
     ],
     "rules": [
       {"ip_cidr": ["10.0.0.0/8","192.168.0.0/16","172.16.0.0/12","127.0.0.0/8","169.254.0.0/16","1.1.1.1/32","8.8.8.8/32"], "action": "route", "outbound": "direct"},
