@@ -1,48 +1,38 @@
-# FINAL_ARCHITECTURE.md
+# Architectural Revision: Split Routing (Server1)
 
-## Overview
-This repository provides a coherent solution for a two-server proxy setup with split routing and VPN capabilities. 
+## 1. Problem Statement
+The initial implementation of "split-routing" mode on server1 caused a total loss of SSH connectivity and created circular dependencies in DNS resolution. Additionally, there were risks of routing loops where traffic from the VPN software itself would be routed back into its own tunnel.
 
-### Key Components
-1. **Server 2 (Foreign Egress)**: Runs Shadowsocks-libev to provide a secure egress point outside Russia.
-2. **Server 1 (Entry & Split Routing)**:
-   - **sing-box (Outbound Client)**: Connects to Server 2 via Shadowsocks. Manages a `tun0` interface with `auto_route`.
-   - **Split Routing**: Uses `rule_set` (binary `.srs`) to route Russian traffic (IPs and domains) directly and everything else through Server 2.
-   - **DNS Strategy**: Russian domains are resolved via local DNS (direct); all other domains are resolved via Google DNS (through Server 2).
-   - **VPN Inbound (Public)**: Provides VLESS (Reality), Trojan (TLS), and Hysteria2 entry points multiplexed on port 443. Traffic from these clients is automatically subject to the split-routing rules.
-   - **WireGuard**: Provides a WireGuard VPN entry point. Client traffic is routed through the split-routing logic (via `tun0`).
-   - **Loop Prevention**: Control traffic for VPN and WireGuard is explicitly routed `direct` to avoid routing loops and broken connections.
+## 2. Root Cause Analysis
+- **SSH Lock-out**: The policy routing rule using `suppress_prefixlength 0` on the `main` table effectively "hid" the default gateway for any non-DNS traffic. This caused SSH response packets (which use the default route) to be diverted to the tunnel interface (`tun0`), breaking established connections.
+- **DNS Loop**: `systemd-resolved` automatically assigned high-priority DNS configuration to the `tun0` interface. This created a situation where the system couldn't resolve the VPN endpoint because it was waiting for the tunnel to provide DNS, but the tunnel couldn't start without DNS resolution.
+- **Routing Loop**: Traffic exiting sing-box via "direct" outbounds (e.g., for RU traffic) hit the system's routing rules and was sent back to `tun0` because it didn't have a more specific route in the `main` table.
 
-## Requirements
-- OS: Ubuntu 22.04+ (tested)
-- Root access
-- Public IP on both servers
-- Domain name for Server 1
+## 3. Implemented Solutions
 
-## Compatibility
-- **sing-box >= 1.12**: Uses the modern `rule_set` configuration. Deprecated `geoip`/`geosite` blocks are replaced with `.srs` references.
+### 3.1 Network Protection (SSH & DNS)
+We introduced high-priority policy rules that explicitly bypass the tunnel for administrative and critical services:
+- **SSH (Port 22)**: Both incoming and outgoing SSH traffic are now forced to use the `main` routing table.
+- **DNS (Port 53) / Bypassing Circularity**: Local DNS queries are kept in the `main` table to ensure the system can always resolve hostnames, preventing circular dependencies.
+- **DNS Loop Mitigation**: A loop was discovered where `systemd-resolved` would automatically assign the `tun0` interface's peer IP (`172.19.0.2`) as a DNS server. To prevent this, sing-box is now configured to explicitly hijack DNS traffic on the tunnel and resolve it via a direct outbound, and the system-level `resolvectl` is used to prevent `tun0` from becoming the default resolver.
 
-## Installation Matrix
+### 3.2 Loop Prevention (Marking)
+To prevent sing-box from catching its own outgoing traffic:
+- All sing-box outbounds (both `direct` and `proxy`) are now tagged with a routing mark (`0xff` / `255`).
+- A policy rule was added: `fwmark 255 lookup main`. This ensures that any packet originated by sing-box uses the standard system routing instead of being diverted back into the tunnel.
 
-| Step | Action | Command |
-| :--- | :--- | :--- |
-| 1 | Setup Server 2 | `bash server2/setup.sh` (configure `.env` first) |
-| 2 | Setup Server 1 (VPN + Routing) | `bash server1/setup.sh split` (configure `.env` first) |
-| 3 | Install MTProxy (Optional) | `bash mtproxy/install-mtproxy.sh` |
+### 3.3 Enhanced Policy Routing
+The global "catch-all" for the tunnel now uses a two-step process:
+1. `ip rule add pref 9000 lookup main suppress_prefixlength 0`: This honors any **specific** routes in the `main` table (like local subnets or manually added direct routes) but ignores the default gateway.
+2. `ip rule add pref 9001 lookup 2022`: Anything that wasn't handled by specific routes in `main` is now sent to the VPN routing table.
 
-## Verification Matrix
+### 3.4 Robust Service Management
+- **Idempotency**: All routing and rule applications now use `del` then `add` or `replace` to ensure multiple runs of `setup.sh` don't create duplicate entries or fail.
+- **User Management**: `add_user.sh` was fixed to target the correct configuration file (`vpn-server.json`) and now includes a check to prevent duplicate user entries.
+- **Rule-set Resilience**: All remote rule-sets are configured with `download_detour: proxy` to ensure they can be updated even if the source (e.g., GitHub) is blocked in the server's region.
 
-| Feature | Verification Method | Expected Result |
-| :--- | :--- | :--- |
-| **Split Routing (RU)** | `curl --interface tun0 https://yandex.ru` | Should return Russian content, IP should be Server 1's IP. |
-| **Split Routing (Foreign)** | `curl --interface tun0 https://ifconfig.me` | Should return Server 2's IP. |
-| **DNS Split** | `sing-box dns query google.com` | Should show resolution via proxy (if using sing-box tool). |
-| **VPN Connectivity** | Connect via VLESS/Trojan/Hysteria | Internet access works; split routing applies to the client. |
-| **WireGuard** | Connect via WireGuard | Internet access works; split routing applies to the client. |
-| **Idempotency** | Run `server1/setup.sh` again | Should complete without errors and not duplicate services/rules. |
-
-## Service Information
-- `sing-box-server2.service`: The outbound tunnel client (runs as root for TUN).
-- `sing-box-vpn.service`: The inbound VPN server (runs as `singbox` user).
-- `wg-quick@wg0.service`: The WireGuard server.
-- `shadowsocks-libev.service`: (On Server 2) The Shadowsocks server.
+## 4. Summary of Changes
+- `server1/setup.sh`: Replaced aggressive routing rules with a tiered priority system (SSH > DNS > Mark > Main-specific > Tunnel).
+- `server1/render_singbox_client_config.sh`: Added `routing_mark` to all outbounds.
+- `server1/vpn_install/setup.sh`: Added `routing_mark` and unified rule-set download detours.
+- `server1/vpn_install/add_user.sh`: Fixed path to `/etc/sing-box/vpn-server.json` and added existence checks.

@@ -43,7 +43,10 @@ bash "$SCRIPT_DIR/install_singbox.sh"
 # 2. Render sing-box CLIENT config for server1 -> server2 (egress) and create systemd unit
 TUN_MODE="$MODE" bash "$SCRIPT_DIR/render_singbox_client_config.sh" "$ENV_FILE"
 
-cat <<'EOF' > /etc/systemd/system/sing-box-server2.service
+# Determine tun interface name (must match render_singbox_client_config.sh)
+TUN_DEV="${SINGBOX_TUN_IFACE:-tun0}"
+
+cat <<EOF > /etc/systemd/system/sing-box-server2.service
 [Unit]
 Description=sing-box Client Tunnel (server1 -> server2)
 After=network-online.target nss-lookup.target
@@ -57,7 +60,10 @@ CapabilityBoundingSet=CAP_NET_ADMIN
 Environment="ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true"
 ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/client-server2.json
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/client-server2.json
-ExecStartPost=-/usr/bin/resolvectl revert tun0
+# Prevent systemd-resolved from using the tunnel for global DNS resolution to avoid loops.
+ExecStartPost=-/usr/bin/resolvectl dns $TUN_DEV ""
+ExecStartPost=-/usr/bin/resolvectl domain $TUN_DEV ""
+ExecStartPost=-/usr/bin/resolvectl default-route $TUN_DEV false
 Restart=always
 RestartSec=3
 LimitNOFILE=infinity
